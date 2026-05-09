@@ -1,0 +1,62 @@
+[project]
+name = "xlikes-viewer"
+version = "0.1.0"
+description = "Browse and sync your X (Twitter) liked-media archive."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.136.1",
+    "gallery-dl>=1.32.1",
+    "httpx>=0.28.1",
+    "imagehash>=4.3.2",
+    "pillow>=12.2.0",
+    "uvicorn>=0.46.0",
+]
+
+[project.optional-dependencies]
+# Desktop window mode (Windows only). Not needed for Railway / server deployment.
+desktop = ["pywebview>=6.2.1"]
+
+[project.scripts]
+xlikes-viewer = "xlikes_viewer.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.9,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pyinstaller>=6.20.0",
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.12",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "unit: fast in-process unit test",
+    "integration: hits filesystem fixtures or HTTP test client",
+]
+
+[tool.coverage.run]
+source = ["xlikes_viewer"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 60
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]

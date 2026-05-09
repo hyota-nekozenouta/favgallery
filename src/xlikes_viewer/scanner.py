@@ -1,0 +1,168 @@
+"""Walk the X-Likes folder, parse gallery-dl JSON, and build an in-memory index."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from xlikes_viewer.x_helpers import extract_hashtags
+
+
+def _resolve_default_library() -> Path:
+    from xlikes_viewer.paths import default_library_root
+
+    return default_library_root()
+
+
+DEFAULT_LIBRARY = _resolve_default_library()
+
+
+@dataclass(frozen=True)
+class Post:
+    """One downloaded media file with its metadata."""
+
+    tweet_id: str  # str so JS can handle big ints losslessly
+    num: int
+    media_path: Path  # absolute path to the .jpg/.mp4/etc.
+    json_path: Path  # absolute path to the sidecar .json
+    media_type: str  # "photo" / "video" / "animated_gif"
+    extension: str
+    width: int | None
+    height: int | None
+    date: str  # ISO-ish "YYYY-MM-DD HH:MM:SS"
+    author_name: str  # X handle, e.g. "butcha_u"
+    author_nick: str  # display name
+    content: str
+    favorite_count: int
+    view_count: int
+    sensitive: bool
+    lang: str
+    hashtags: tuple[str, ...]
+    rel_media: str  # path relative to library root, forward-slashed (for URLs)
+
+
+@dataclass(frozen=True)
+class AuthorSummary:
+    name: str
+    nick: str
+    post_count: int
+
+
+@dataclass
+class Index:
+    library_root: Path
+    posts: list[Post] = field(default_factory=list)
+    authors: dict[str, AuthorSummary] = field(default_factory=dict)
+    tags: dict[str, int] = field(default_factory=dict)  # tag -> post count
+
+    def filter(
+        self,
+        *,
+        author: str | None = None,
+        tag: str | None = None,
+        media_type: str | None = None,
+        query: str | None = None,
+    ) -> list[Post]:
+        out = self.posts
+        if author:
+            out = [p for p in out if p.author_name == author]
+        if tag:
+            out = [p for p in out if tag in p.hashtags]
+        if media_type:
+            if media_type == "video":
+                out = [p for p in out if p.extension in ("mp4", "mov", "webm")]
+            elif media_type == "photo":
+                out = [p for p in out if p.extension not in ("mp4", "mov", "webm")]
+            else:
+                out = [p for p in out if p.media_type == media_type]
+        if query:
+            q = query.lower()
+            out = [
+                p
+                for p in out
+                if q in p.content.lower()
+                or q in p.author_name.lower()
+                or q in p.author_nick.lower()
+                or q in " ".join(p.hashtags).lower()
+            ]
+        return out
+
+
+def _parse_json(json_path: Path) -> Post | None:
+    """Parse one *.json sidecar into a Post, or return None on malformed input."""
+    try:
+        raw = json.loads(json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    extension = raw.get("extension")
+    tweet_id = raw.get("tweet_id")
+    num = raw.get("num", 1)
+    if not extension or not tweet_id:
+        return None
+
+    media_path = json_path.parent / f"{tweet_id}_{num}.{extension}"
+    if not media_path.exists():
+        return None
+    author = raw.get("author") or {}
+    content = str(raw.get("content", "") or "")
+    rel = media_path.relative_to(json_path.parents[1]).as_posix()
+
+    return Post(
+        tweet_id=str(tweet_id),
+        num=int(num),
+        media_path=media_path,
+        json_path=json_path,
+        media_type=raw.get("type", "photo"),
+        extension=str(extension).lower(),
+        width=raw.get("width"),
+        height=raw.get("height"),
+        date=str(raw.get("date", "")),
+        author_name=str(author.get("name", "unknown")),
+        author_nick=str(author.get("nick", "")),
+        content=content,
+        favorite_count=int(raw.get("favorite_count", 0) or 0),
+        view_count=int(raw.get("view_count", 0) or 0),
+        sensitive=bool(raw.get("sensitive", False)),
+        lang=str(raw.get("lang", "")),
+        hashtags=extract_hashtags(content),
+        rel_media=rel,
+    )
+
+
+def scan_library(root: Path = DEFAULT_LIBRARY) -> Index:
+    """Walk `root` recursively for *.json sidecars and assemble an Index."""
+    index = Index(library_root=root)
+    if not root.exists():
+        return index
+
+    for json_path in root.rglob("*.json"):
+        post = _parse_json(json_path)
+        if post is None:
+            continue
+        index.posts.append(post)
+
+    # Sort newest-first (date string is sortable).
+    index.posts.sort(key=lambda p: p.date, reverse=True)
+
+    author_counts: dict[str, int] = {}
+    author_nicks: dict[str, str] = {}
+    tag_counts: dict[str, int] = {}
+    for p in index.posts:
+        author_counts[p.author_name] = author_counts.get(p.author_name, 0) + 1
+        if p.author_nick and p.author_name not in author_nicks:
+            author_nicks[p.author_name] = p.author_nick
+        for t in p.hashtags:
+            tag_counts[t] = tag_counts.get(t, 0) + 1
+
+    index.authors = {
+        name: AuthorSummary(
+            name=name,
+            nick=author_nicks.get(name, ""),
+            post_count=count,
+        )
+        for name, count in sorted(author_counts.items(), key=lambda kv: -kv[1])
+    }
+    index.tags = dict(sorted(tag_counts.items(), key=lambda kv: -kv[1]))
+    return index

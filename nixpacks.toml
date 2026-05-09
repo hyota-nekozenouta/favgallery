@@ -1,0 +1,17 @@
+# Nixpacks configuration for Railway deployment
+# https://nixpacks.com/docs/configuration/file
+
+[phases.setup]
+# Install ffmpeg from nixpkgs — available on Railway's nixpacks builder
+nixPkgs = ["ffmpeg"]
+
+[phases.install]
+# Install production dependencies without the desktop optional extra (pywebview)
+cmds = [
+    "pip install uv",
+    "uv pip install --system fastapi 'uvicorn[standard]' gallery-dl httpx imagehash pillow",
+]
+
+[start]
+# PORT is automatically injected by Railway
+cmd = "uvicorn xlikes_viewer.server:app --host 0.0.0.0 --port $PORT"
