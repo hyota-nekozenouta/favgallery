@@ -56,3 +56,25 @@ def thumbnail_bytes(media: Path, size: int = 400) -> bytes | None:
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_bytes(data)
     return data
+
+
+def thumbnail_bytes_from_raw(raw: bytes, size: int = 400) -> bytes | None:
+    """Return JPEG thumbnail bytes generated from raw image bytes (e.g. streamed from R2).
+
+    Returns None if the data is not a supported image format or generation fails.
+    """
+    try:
+        with Image.open(BytesIO(raw)) as im:
+            im = ImageOps.exif_transpose(im)
+            im.thumbnail((size, size), Image.Resampling.LANCZOS)
+            if im.mode in ("RGBA", "LA", "P"):
+                bg = Image.new("RGB", im.size, (24, 24, 28))
+                bg.paste(im, mask=im.split()[-1] if "A" in im.mode else None)
+                im = bg
+            elif im.mode != "RGB":
+                im = im.convert("RGB")
+            buf = BytesIO()
+            im.save(buf, "JPEG", quality=82, optimize=True)
+            return buf.getvalue()
+    except Exception:
+        return None

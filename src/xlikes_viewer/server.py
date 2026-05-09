@@ -26,7 +26,7 @@ from xlikes_viewer.r2 import R2Client, r2_config_from_env
 from xlikes_viewer.save_one import save_tweet
 from xlikes_viewer.scanner import DEFAULT_LIBRARY, Index, Post, scan_library
 from xlikes_viewer.sync import SyncRunner
-from xlikes_viewer.thumbs import thumbnail_bytes
+from xlikes_viewer.thumbs import thumbnail_bytes, thumbnail_bytes_from_raw
 from xlikes_viewer.timeline import (
     TimelineRefresher,
     fetch_author_media_posts,
@@ -798,6 +798,24 @@ def create_app(
         result = sync_runner.cleanup_local()
         return JSONResponse(result)
 
+    @app.get("/api/admin/storage-status")
+    def admin_storage_status() -> JSONResponse:
+        """Return local library file count/size and R2 config status.
+
+        Useful for confirming that local files have been cleaned up after R2 upload.
+        """
+        media_files = [
+            f for f in library_root.rglob("*")
+            if f.is_file() and not f.name.startswith(".")
+        ] if library_root.exists() else []
+        total_bytes = sum(f.stat().st_size for f in media_files)
+        return JSONResponse({
+            "r2_configured": r2_client is not None,
+            "local_file_count": len(media_files),
+            "local_size_bytes": total_bytes,
+            "local_size_mb": round(total_bytes / 1024 / 1024, 1),
+        })
+
     @app.post("/api/admin/reset-archive-db")
     def admin_reset_archive_db() -> JSONResponse:
         """Delete gallery-dl's archive.sqlite so the next sync re-downloads everything.
@@ -900,11 +918,27 @@ def create_app(
 
     @app.get("/thumb/{rel_path:path}")
     def thumb(rel_path: str, size: int = Query(default=400, ge=64, le=1600)) -> Response:
-        target = _resolve_under_library(rel_path)
-        data = thumbnail_bytes(target, size=size)
-        if data is None:
+        _validate_rel_path(rel_path)
+        target = library_root / rel_path
+        # Try local file first (fast path, works during sync before R2 upload).
+        if target.is_file():
+            data = thumbnail_bytes(target.resolve(), size=size)
+            if data is not None:
+                return Response(content=data, media_type="image/jpeg")
             return FileResponse(target)
-        return Response(content=data, media_type="image/jpeg")
+        # Local file is gone (uploaded to R2 and deleted) — generate from R2 stream.
+        if r2_client is not None:
+            try:
+                _, _, body_iter = r2_client.stream_object(rel_path)
+                raw = b"".join(body_iter)
+                data = thumbnail_bytes_from_raw(raw, size=size)
+                if data is not None:
+                    return Response(content=data, media_type="image/jpeg")
+                # Not an image (e.g. video) — serve the raw bytes directly.
+                return Response(content=raw, media_type="application/octet-stream")
+            except Exception:
+                pass
+        raise HTTPException(status_code=404, detail="not found")
 
     return app
 
