@@ -6,10 +6,11 @@
 nixPkgs = ["ffmpeg"]
 
 [phases.install]
-# Install production dependencies without the desktop optional extra (pywebview)
+# Install the package and all dependencies from pyproject.toml
+# pywebview is an optional extra (desktop only) so it is not installed here
 cmds = [
     "pip install uv",
-    "uv pip install --system fastapi 'uvicorn[standard]' gallery-dl httpx imagehash pillow",
+    "uv pip install --system .",
 ]
 
 [start]
