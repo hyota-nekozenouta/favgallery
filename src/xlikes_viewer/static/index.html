@@ -95,7 +95,7 @@
     .tab-btn:not(.active):hover { background: #1c1c22; color: #e6e6ea; }
     .tab-btn.active { background: #4f46e5; color: white; }
     .popover {
-      position: absolute; min-width: 220px; max-width: 280px;
+      position: fixed; min-width: 220px; max-width: 280px;
       background: #14141a; border: 1px solid #2a2a30; border-radius: 8px;
       padding: 8px; z-index: 60; box-shadow: 0 6px 24px rgba(0,0,0,.5);
     }
@@ -113,7 +113,7 @@
     #grid.reel-mode { scroll-snap-type: y mandatory; padding: 0; }
     #grid.reel-mode .masonry { column-count: unset; display: block; }
     .reel-item {
-      height: var(--reel-height, 100vh); scroll-snap-align: start;
+      height: var(--reel-height, 100vh); scroll-snap-align: start; scroll-snap-stop: always;
       display: flex; align-items: center; justify-content: center;
       position: relative; background: #000; overflow: hidden;
     }
@@ -131,7 +131,17 @@
     .reel-item .add-btn,
     .reel-item .like-btn,
     .reel-item .del-btn { opacity: 1; top: 12px; right: 12px; z-index: 2; }
-    .reel-item .add-btn { top: 52px; right: 12px; }
+    .reel-item .like-btn {
+      top: max(12px, env(safe-area-inset-top, 12px));
+      right: max(12px, env(safe-area-inset-right, 12px));
+    }
+    .reel-item .add-btn {
+      top: max(52px, calc(env(safe-area-inset-top, 0px) + 40px));
+      right: max(12px, env(safe-area-inset-right, 12px));
+    }
+    @media (pointer: coarse) {
+      .tile .like-btn, .tile .add-btn, .tile .del-btn { opacity: 0.85; }
+    }
     .reel-seen-badge {
       position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
       background: rgba(79, 70, 229, 0.85); color: #fff;
@@ -1033,17 +1043,21 @@ function reelItemHtml(p, idx, isSeenBoundary = false) {
 
 // --- Reel: 1-item-at-a-time scroll control --------------------------
 let _reelScrollLocked = false;
+let _reelCurrentIndex = 0;
 let _reelTouchStartY = 0;
 let _reelWheelHandler = null;
 let _reelTouchStartHandler = null;
+let _reelTouchMoveHandler = null;
 let _reelTouchEndHandler = null;
 
 function _reelScrollBy(direction) {
   if (_reelScrollLocked) return;
-  _reelScrollLocked = true;
   const grid = $('#grid');
-  const itemHeight = grid.clientHeight;
-  grid.scrollBy({ top: itemHeight * direction, behavior: 'smooth' });
+  const items = grid.querySelectorAll('.reel-item');
+  if (!items.length) return;
+  _reelCurrentIndex = Math.max(0, Math.min(items.length - 1, _reelCurrentIndex + direction));
+  _reelScrollLocked = true;
+  grid.scrollTo({ top: _reelCurrentIndex * grid.clientHeight, behavior: 'smooth' });
   setTimeout(() => { _reelScrollLocked = false; }, 550);
 }
 
@@ -1052,10 +1066,13 @@ function setupReelScrollControl() {
   // Clean up previous handlers
   if (_reelWheelHandler) grid.removeEventListener('wheel', _reelWheelHandler);
   if (_reelTouchStartHandler) grid.removeEventListener('touchstart', _reelTouchStartHandler);
+  if (_reelTouchMoveHandler) grid.removeEventListener('touchmove', _reelTouchMoveHandler);
   if (_reelTouchEndHandler) grid.removeEventListener('touchend', _reelTouchEndHandler);
-  _reelWheelHandler = null; _reelTouchStartHandler = null; _reelTouchEndHandler = null;
+  _reelWheelHandler = null; _reelTouchStartHandler = null; _reelTouchMoveHandler = null; _reelTouchEndHandler = null;
 
   if (state.layout !== 'reel') return;
+
+  _reelCurrentIndex = 0;
 
   _reelWheelHandler = (e) => {
     e.preventDefault();
@@ -1063,6 +1080,9 @@ function setupReelScrollControl() {
   };
   _reelTouchStartHandler = (e) => {
     _reelTouchStartY = e.touches[0].clientY;
+  };
+  _reelTouchMoveHandler = (e) => {
+    e.preventDefault(); // prevent native inertia scroll stacking
   };
   _reelTouchEndHandler = (e) => {
     const dy = _reelTouchStartY - e.changedTouches[0].clientY;
@@ -1072,6 +1092,7 @@ function setupReelScrollControl() {
 
   grid.addEventListener('wheel', _reelWheelHandler, { passive: false });
   grid.addEventListener('touchstart', _reelTouchStartHandler, { passive: true });
+  grid.addEventListener('touchmove', _reelTouchMoveHandler, { passive: false });
   grid.addEventListener('touchend', _reelTouchEndHandler, { passive: true });
 }
 
@@ -1121,8 +1142,11 @@ async function openListPopover(idx, anchor) {
       <button class="add" id="popNewBtn">追加</button>
     </div>`;
   const rect = anchor.getBoundingClientRect();
-  pop.style.top = (rect.bottom + 4 + window.scrollY) + 'px';
-  pop.style.left = Math.min(rect.right - 220, window.innerWidth - 290) + 'px';
+  const popH = 220;
+  const spaceBelow = window.innerHeight - rect.bottom;
+  const useAbove = spaceBelow < popH + 8 && rect.top > popH + 8;
+  pop.style.top = useAbove ? (rect.top - popH - 4) + 'px' : (rect.bottom + 4) + 'px';
+  pop.style.left = Math.max(8, Math.min(rect.right - 220, window.innerWidth - 230)) + 'px';
   pop.classList.remove('hidden');
 
   async function likeIfTimeline() {
