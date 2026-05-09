@@ -7,9 +7,8 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body { background: #0a0a0d; color: #e6e6ea; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif; }
-    .masonry { column-gap: 12px; column-count: 1; }
-    @media (min-width: 640px)  { .masonry { column-count: 1; } }
-    @media (min-width: 768px)  { .masonry { column-count: 2; } }
+    .masonry { column-gap: 8px; column-count: 2; }
+    @media (min-width: 768px)  { .masonry { column-count: 2; column-gap: 12px; } }
     @media (min-width: 1024px) { .masonry { column-count: 3; } }
     @media (min-width: 1280px) { .masonry { column-count: 3; } }
     @media (min-width: 1700px) { .masonry { column-count: 4; } }
@@ -36,6 +35,12 @@
     .add-btn { right: 8px; }
     .like-btn { right: 48px; }
     .del-btn { right: 48px; }   /* takes the slot when like-btn is hidden */
+    .list-star {
+      position: absolute; top: 6px; right: 6px;
+      font-size: 13px; color: #facc15; line-height: 1;
+      text-shadow: 0 1px 3px rgba(0,0,0,.8);
+      pointer-events: none; z-index: 3;
+    }
     .tile:hover .add-btn, .tile:hover .like-btn, .tile:hover .del-btn { opacity: 1; }
     .add-btn:hover { background: #4f46e5; }
     .like-btn:hover { background: #e0245e; }
@@ -989,10 +994,12 @@ function tileHtml(p, idx) {
     ? `<div class="like-btn" title="X でいいね + 保存">♥</div>`
     : `<div class="del-btn" title="削除 (再ダウンロード防止)">🗑</div>`;
   const addBtn = `<div class="add-btn" title="リストに追加">+</div>`;
+  const starBadge = p.in_any_list ? `<div class="list-star">★</div>` : '';
   return `<div class="tile cursor-pointer" data-idx="${idx}">
     ${media}
     ${sideBtn}
     ${addBtn}
+    ${starBadge}
     <div class="info">
       <div class="truncate">${escapeHtml(p.author_nick || p.author_name)} <span class="text-zinc-400">@${escapeHtml(p.author_name)}</span></div>
       ${p.favorite_count ? `<div class="text-zinc-400 text-[11px]">♥ ${p.favorite_count.toLocaleString()}</div>` : ''}

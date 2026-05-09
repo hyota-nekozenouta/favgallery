@@ -380,10 +380,14 @@ def create_app(
             filtered = [p for p in filtered if (p.tweet_id, p.num) in keys]
         total = len(filtered)
         page = filtered[offset : offset + limit]
+        listed_keys = db.all_listed_post_keys()
+        items = [_post_payload(p) for p in page]
+        for item, p in zip(items, page):
+            item["in_any_list"] = (p.tweet_id, p.num) in listed_keys
         return JSONResponse(
             {
                 "total": total,
-                "items": [_post_payload(p) for p in page],
+                "items": items,
                 "offset": offset,
                 "limit": limit,
             }
@@ -504,21 +508,11 @@ def create_app(
 
     @app.get("/api/favorite-authors")
     def fav_authors_get() -> JSONResponse:
-        import json as _json
-        if _fav_authors_path.exists():
-            try:
-                return JSONResponse(_json.loads(_fav_authors_path.read_text(encoding="utf-8")))
-            except Exception:
-                pass
-        return JSONResponse([])
+        return JSONResponse(db.get_favorite_authors())
 
     @app.post("/api/favorite-authors")
     def fav_authors_set(body: _FavAuthorsBody) -> JSONResponse:
-        import json as _json
-        _fav_authors_path.parent.mkdir(parents=True, exist_ok=True)
-        _fav_authors_path.write_text(
-            _json.dumps(body.authors, ensure_ascii=False), encoding="utf-8"
-        )
+        db.set_favorite_authors(body.authors)
         return JSONResponse({"saved": True})
 
     @app.get("/api/lists")

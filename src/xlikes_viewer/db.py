@@ -213,6 +213,30 @@ class Database:
             ).fetchall()
         return {(r[0], int(r[1])) for r in rows}
 
+    def all_listed_post_keys(self) -> set[tuple[str, int]]:
+        """Return the set of (tweet_id, num) that appear in any list."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT DISTINCT tweet_id, num FROM list_items"
+            ).fetchall()
+        return {(r[0], int(r[1])) for r in rows}
+
+    def get_favorite_authors(self) -> list[str]:
+        """Return the saved favorite author list (stored in settings table)."""
+        import json as _json
+        raw = self.get_setting("favorite_authors")
+        if raw:
+            try:
+                return _json.loads(raw)
+            except Exception:
+                pass
+        return []
+
+    def set_favorite_authors(self, authors: list[str]) -> None:
+        """Persist the favorite author list to the settings table."""
+        import json as _json
+        self.set_setting("favorite_authors", _json.dumps(authors, ensure_ascii=False))
+
     # --- Timeline cache ------------------------------------------------
 
     def upsert_timeline_post(self, post: TimelinePost) -> None:
