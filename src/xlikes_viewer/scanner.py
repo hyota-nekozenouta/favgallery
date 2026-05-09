@@ -103,8 +103,7 @@ def _parse_json(json_path: Path) -> Post | None:
         return None
 
     media_path = json_path.parent / f"{tweet_id}_{num}.{extension}"
-    if not media_path.exists():
-        return None
+    # Media file may be absent locally when stored in R2 — do not skip.
     author = raw.get("author") or {}
     content = str(raw.get("content", "") or "")
     rel = media_path.relative_to(json_path.parents[1]).as_posix()
