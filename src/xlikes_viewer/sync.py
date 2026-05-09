@@ -116,14 +116,21 @@ class SyncRunner:
         Uses the relative path (forward-slashed, relative to library_root) as
         the R2 object key so that ``/api/media/{rel_path}`` can retrieve it.
         Skips ``.json`` sidecars and ``thumbs/`` subdirectories.
-        After upload, deletes successfully uploaded files to free local disk space.
+        After upload, deletes successfully uploaded AND already-in-R2 files to
+        free Railway volume space.
         """
         assert self._r2_client is not None  # noqa: S101 — caller guarantee
         assert self._library_root is not None  # noqa: S101 — caller guarantee
         library = self._library_root
+
+        # Fetch the full R2 key set once (paginated list) instead of per-file HEAD
+        # requests — orders of magnitude faster for large libraries.
+        self.state.log_lines.append("[r2] fetching key list from R2...")
+        r2_keys = self._r2_client.list_all_keys()
+        self.state.log_lines.append(f"[r2] {len(r2_keys)} keys in bucket")
+
         uploaded_paths: list[Path] = []
         already_in_r2: list[Path] = []
-        skipped = 0
         for media_path in library.rglob("*"):
             if not media_path.is_file():
                 continue
@@ -134,17 +141,18 @@ class SyncRunner:
             if "thumbs" in rel.parts[:-1]:
                 continue
             key = rel.as_posix()
-            if self._r2_client.object_exists(key):
+            if key in r2_keys:
                 # Already in R2 — mark for local deletion to free Railway volume space.
                 already_in_r2.append(media_path)
-                skipped += 1
-                continue
-            try:
-                self._r2_client.upload_file(media_path, key)
-                uploaded_paths.append(media_path)
-            except Exception as exc:
-                self.state.log_lines.append(f"[r2] upload failed for {key}: {exc}")
+            else:
+                try:
+                    self._r2_client.upload_file(media_path, key)
+                    uploaded_paths.append(media_path)
+                except Exception as exc:
+                    self.state.log_lines.append(f"[r2] upload failed for {key}: {exc}")
+
         uploaded = len(uploaded_paths)
+        skipped = len(already_in_r2)
         self.state.log_lines.append(
             f"[r2] upload complete: {uploaded} uploaded, {skipped} already present"
         )
@@ -167,11 +175,14 @@ class SyncRunner:
 
         Called by ``/api/admin/cleanup-local`` to reclaim disk space on demand.
         Safe to run at any time; only removes files confirmed to exist in R2.
+        Uses a single paginated list_objects_v2 call instead of per-file HEAD
+        requests for efficiency.
         Returns counts: ``{"deleted": n, "checked": n, "errors": n}``.
         """
         if self._r2_client is None or self._library_root is None:
             return {"deleted": 0, "checked": 0, "errors": 0}
         library = self._library_root
+        r2_keys = self._r2_client.list_all_keys()
         deleted = 0
         checked = 0
         errors = 0
@@ -185,7 +196,7 @@ class SyncRunner:
                 continue
             key = rel.as_posix()
             checked += 1
-            if not self._r2_client.object_exists(key):
+            if key not in r2_keys:
                 continue
             try:
                 media_path.unlink()

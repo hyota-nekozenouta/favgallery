@@ -13,7 +13,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Set
 
 
 @dataclass(frozen=True)
@@ -55,6 +55,8 @@ class R2Client:
                 "boto3 is required for R2 storage. "
                 "Install it with: pip install 'xlikes-viewer[cloud]'"
             ) from exc
+        from botocore.config import Config  # type: ignore[import-untyped]
+
         self._config = config
         self._client = boto3.client(
             "s3",
@@ -62,6 +64,7 @@ class R2Client:
             aws_access_key_id=config.access_key_id,
             aws_secret_access_key=config.secret_access_key,
             region_name="auto",
+            config=Config(connect_timeout=10, read_timeout=30),
         )
         self._bucket = config.bucket_name
 
@@ -76,6 +79,19 @@ class R2Client:
             return True
         except Exception:
             return False
+
+    def list_all_keys(self) -> Set[str]:
+        """Return the set of all object keys in the bucket.
+
+        Uses paginated list_objects_v2 — far faster than per-file head_object
+        when checking many files at once.
+        """
+        keys: Set[str] = set()
+        paginator = self._client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self._bucket):
+            for obj in page.get("Contents", []):
+                keys.add(obj["Key"])
+        return keys
 
     def stream_object(self, key: str) -> tuple[int, str, Iterator[bytes]]:
         """Stream an object from R2.
