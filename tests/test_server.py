@@ -435,6 +435,67 @@ def test_unliked_filters_out_my_likes(
     assert sorted(it["tweet_id"] for it in r.json()["items"]) == ["5001", "5003"]
 
 
+# ---------------------------------------------------------------------------
+# GALLERY_DL_COOKIES env var and /api/sync/start cookies check
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_gallery_dl_cookies_env_writes_cookies_file(
+    monkeypatch: pytest.MonkeyPatch, fake_library: Path
+) -> None:
+    """GALLERY_DL_COOKIES env var content must be written to cookies.txt at startup."""
+    cookies_path = fake_library.parent / "cookies.txt"
+    assert not cookies_path.exists()
+    cookie_content = "# Netscape HTTP Cookie File\nexample.com\tFALSE\t/\tFALSE\t0\tsession\tabc123\n"
+    monkeypatch.setenv("GALLERY_DL_COOKIES", cookie_content)
+    create_app(library_root=fake_library, scan_in_background=False)
+    assert cookies_path.exists()
+    assert "abc123" in cookies_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.integration
+def test_gallery_dl_cookies_env_empty_does_not_overwrite(
+    monkeypatch: pytest.MonkeyPatch, fake_library: Path
+) -> None:
+    """Unset / empty GALLERY_DL_COOKIES must not touch existing cookies.txt."""
+    cookies_path = fake_library.parent / "cookies.txt"
+    original = "# existing cookies\n"
+    cookies_path.write_text(original, encoding="utf-8")
+    monkeypatch.delenv("GALLERY_DL_COOKIES", raising=False)
+    create_app(library_root=fake_library, scan_in_background=False)
+    assert cookies_path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.integration
+def test_sync_start_returns_400_when_cookies_missing(
+    monkeypatch: pytest.MonkeyPatch, fake_library: Path
+) -> None:
+    """POST /api/sync/start must return 400 when cookies.txt does not exist."""
+    monkeypatch.delenv("GALLERY_DL_COOKIES", raising=False)
+    cookies_path = fake_library.parent / "cookies.txt"
+    assert not cookies_path.exists()
+    app = create_app(library_root=fake_library, scan_in_background=False)
+    client = TestClient(app)
+    r = client.post("/api/sync/start")
+    assert r.status_code == 400
+    assert "cookies" in r.json()["reason"].lower()
+
+
+@pytest.mark.integration
+def test_sync_start_not_400_when_cookies_present(
+    monkeypatch: pytest.MonkeyPatch, fake_library: Path
+) -> None:
+    """POST /api/sync/start must not return 400 when cookies.txt exists (exe missing → 409)."""
+    monkeypatch.delenv("GALLERY_DL_COOKIES", raising=False)
+    cookies_path = fake_library.parent / "cookies.txt"
+    cookies_path.write_text("# cookies\n", encoding="utf-8")
+    app = create_app(library_root=fake_library, scan_in_background=False)
+    client = TestClient(app)
+    r = client.post("/api/sync/start")
+    # cookies.txt present → 400 must NOT be returned (exe missing → 409 expected)
+    assert r.status_code != 400
+
+
 @pytest.mark.integration
 def test_like_and_save_records_my_like(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path

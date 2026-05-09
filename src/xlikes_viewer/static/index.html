@@ -1634,7 +1634,23 @@ async function loadFavoriteAuthors() {
   await Promise.all([loadLibrary(), loadLists(), loadLastSeen(), loadMe(), loadFavoriteAuthors()]);
   setupSeenObserver();
   await fetchPosts();
-  await fetch('/api/sync/start', { method: 'POST' });
+  // Auto-sync on page load — runs in background, does not block UI.
+  try {
+    const syncRes = await fetch('/api/sync/start', { method: 'POST' });
+    if (!syncRes.ok && syncRes.status !== 409) {
+      // 409 = already running → silent ignore. Other errors (e.g. 400 = cookies missing) → notify.
+      const d = await syncRes.json().catch(() => ({}));
+      const reason = d.reason || `HTTP ${syncRes.status}`;
+      const errEl = document.createElement('div');
+      errEl.id = 'syncErrorBanner';
+      errEl.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);'
+        + 'background:#7f1d1d;color:#fca5a5;padding:8px 16px;border-radius:6px;'
+        + 'font-size:13px;z-index:9999;max-width:80%;text-align:center;';
+      errEl.textContent = '同期エラー: ' + reason;
+      document.body.appendChild(errEl);
+      setTimeout(() => errEl.remove(), 15000);
+    }
+  } catch { /* network error during sync start — ignore */ }
   await pollSync();
 })();
 </script>

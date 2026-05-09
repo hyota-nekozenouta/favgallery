@@ -64,6 +64,20 @@ _LAST_SEEN_KEY = "last_seen_timeline_tweet_id"
 _MY_USERNAME_KEY = "my_username"
 
 
+def _write_cookies_from_env(cookies_path: Path) -> None:
+    """Write GALLERY_DL_COOKIES env var content to cookies_path if set.
+
+    Called at startup so Railway Variables can supply cookies without file
+    transfers or CLI commands.  An empty / unset var is silently ignored so
+    existing cookies.txt files are preserved.
+    """
+    content = os.environ.get("GALLERY_DL_COOKIES", "")
+    if not content:
+        return
+    cookies_path.parent.mkdir(parents=True, exist_ok=True)
+    cookies_path.write_text(content, encoding="utf-8")
+
+
 def _ensure_gallerydl_config(config_path: Path, library_root: Path) -> None:
     """Write gallery-dl.json with current absolute paths.
 
@@ -287,6 +301,7 @@ def create_app(
 
     db = Database(library_root / "xlikes.sqlite")
     cookies_file = library_root.parent / "cookies.txt"  # data/cookies.txt
+    _write_cookies_from_env(cookies_file)
     cdn_proxy = CdnProxy(cookies_file)
     gallerydl_config_path = library_root.parent.parent / "config" / "gallery-dl.json"
     _fav_authors_path = library_root.parent.parent / "config" / "favorite_authors.json"
@@ -733,6 +748,11 @@ def create_app(
 
     @app.post("/api/sync/start")
     def sync_start() -> JSONResponse:
+        if not cookies_file.exists():
+            return JSONResponse(
+                {"started": False, "reason": "cookies.txt not found — set GALLERY_DL_COOKIES env var"},
+                status_code=400,
+            )
         ok = sync_runner.start()
         if not ok:
             return JSONResponse(
