@@ -1031,10 +1031,55 @@ function reelItemHtml(p, idx, isSeenBoundary = false) {
   </div>`;
 }
 
+// --- Reel: 1-item-at-a-time scroll control --------------------------
+let _reelScrollLocked = false;
+let _reelTouchStartY = 0;
+let _reelWheelHandler = null;
+let _reelTouchStartHandler = null;
+let _reelTouchEndHandler = null;
+
+function _reelScrollBy(direction) {
+  if (_reelScrollLocked) return;
+  _reelScrollLocked = true;
+  const grid = $('#grid');
+  const itemHeight = grid.clientHeight;
+  grid.scrollBy({ top: itemHeight * direction, behavior: 'smooth' });
+  setTimeout(() => { _reelScrollLocked = false; }, 550);
+}
+
+function setupReelScrollControl() {
+  const grid = $('#grid');
+  // Clean up previous handlers
+  if (_reelWheelHandler) grid.removeEventListener('wheel', _reelWheelHandler);
+  if (_reelTouchStartHandler) grid.removeEventListener('touchstart', _reelTouchStartHandler);
+  if (_reelTouchEndHandler) grid.removeEventListener('touchend', _reelTouchEndHandler);
+  _reelWheelHandler = null; _reelTouchStartHandler = null; _reelTouchEndHandler = null;
+
+  if (state.layout !== 'reel') return;
+
+  _reelWheelHandler = (e) => {
+    e.preventDefault();
+    _reelScrollBy(e.deltaY >= 0 ? 1 : -1);
+  };
+  _reelTouchStartHandler = (e) => {
+    _reelTouchStartY = e.touches[0].clientY;
+  };
+  _reelTouchEndHandler = (e) => {
+    const dy = _reelTouchStartY - e.changedTouches[0].clientY;
+    if (Math.abs(dy) < 30) return;
+    _reelScrollBy(dy > 0 ? 1 : -1);
+  };
+
+  grid.addEventListener('wheel', _reelWheelHandler, { passive: false });
+  grid.addEventListener('touchstart', _reelTouchStartHandler, { passive: true });
+  grid.addEventListener('touchend', _reelTouchEndHandler, { passive: true });
+}
+
 let reelObserver = null;
 function setupReelObserver() {
   if (reelObserver) reelObserver.disconnect();
-  if (state.layout !== 'reel') { reelObserver = null; return; }
+  if (state.layout !== 'reel') { reelObserver = null; setupReelScrollControl(); return; }
+  setupReelScrollControl();
   reelObserver = new IntersectionObserver(entries => {
     entries.forEach(e => {
       const video = e.target.querySelector('video.reel-media');
