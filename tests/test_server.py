@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 from pathlib import Path
 
 import pytest
@@ -495,6 +496,45 @@ def test_sync_start_not_400_when_cookies_present(
     # cookies.txt present → 400 must NOT be returned
     # gallery-dl is always available so sync starts (200) or fails with 409 if already running
     assert r.status_code != 400
+
+
+# ---------------------------------------------------------------------------
+# gallery-dl.json Railway generation (ENG-106)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_ensure_gallerydl_config_written_in_nonportable_env(
+    monkeypatch: pytest.MonkeyPatch, fake_library: Path, tmp_path: Path
+) -> None:
+    """_ensure_gallerydl_config must write gallery-dl.json when portable_root() is None (Railway)."""
+    from xlikes_viewer import server as server_module
+    from xlikes_viewer.server import _ensure_gallerydl_config
+
+    monkeypatch.setattr(server_module, "portable_root", lambda: None)
+    config_path = tmp_path / "config" / "gallery-dl.json"
+    _ensure_gallerydl_config(config_path, fake_library)
+
+    assert config_path.exists(), "gallery-dl.json must be created in Railway mode"
+    cfg = json.loads(config_path.read_text(encoding="utf-8"))
+    assert cfg["downloader"]["ffmpeg-location"] == "ffmpeg"
+    cookies_in_cfg = cfg["extractor"]["twitter"]["cookies"]
+    expected_cookies = str(fake_library.parent / "cookies.txt").replace("\\", "/")
+    assert cookies_in_cfg == expected_cookies
+    base_dir = cfg["extractor"]["base-directory"]
+    assert base_dir.endswith("/")
+    assert fake_library.name in base_dir
+
+
+@pytest.mark.integration
+def test_gallerydl_config_path_is_under_data_in_nonportable_env(
+    fake_library: Path
+) -> None:
+    """In non-frozen env (Railway-equivalent), gallery-dl.json must be at library_root.parent/config/."""
+    # portable_root() naturally returns None in the test environment (not frozen).
+    app = create_app(library_root=fake_library, scan_in_background=False)
+    cfg_path: Path = app.state.timeline_refresher.gallerydl_config_path  # type: ignore[attr-defined]
+    assert cfg_path == fake_library.parent / "config" / "gallery-dl.json"
+    assert cfg_path.exists(), "config must be written at startup"
 
 
 @pytest.mark.integration

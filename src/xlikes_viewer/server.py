@@ -31,6 +31,7 @@ from xlikes_viewer.timeline import (
     fetch_author_media_posts,
     fetch_my_liked_tweet_ids,
 )
+from xlikes_viewer.paths import portable_root
 from xlikes_viewer.x_helpers import tweet_url
 
 
@@ -83,19 +84,19 @@ def _ensure_gallerydl_config(config_path: Path, library_root: Path) -> None:
 
     Called at startup so moving the portable folder to another PC automatically
     fixes stale paths (cookies, ffmpeg, base-directory, archive).
-    Only runs when a portable layout is detected (data/ sibling of the exe).
+    Runs in both portable (Windows) and server (Railway) layouts.
     """
-    from xlikes_viewer.paths import portable_root
-
-    if portable_root() is None:
-        return
-
     def _fwd(p: Path) -> str:
         return str(p).replace("\\", "/")
 
     data_dir = library_root.parent
-    bundle_root = library_root.parent.parent
-    ffmpeg = bundle_root / "ffmpeg" / "bin" / "ffmpeg.exe"
+    if portable_root() is not None:
+        bundle_root = library_root.parent.parent
+        ffmpeg_exe = bundle_root / "ffmpeg" / "bin" / "ffmpeg.exe"
+        ffmpeg_location: str = _fwd(ffmpeg_exe) if ffmpeg_exe.exists() else "ffmpeg"
+    else:
+        # Railway: ffmpeg is on PATH
+        ffmpeg_location = "ffmpeg"
 
     desired: dict = {
         "extractor": {
@@ -113,7 +114,7 @@ def _ensure_gallerydl_config(config_path: Path, library_root: Path) -> None:
         },
         "downloader": {
             "mtime": True,
-            "ffmpeg-location": _fwd(ffmpeg) if ffmpeg.exists() else "ffmpeg",
+            "ffmpeg-location": ffmpeg_location,
         },
         "output": {"progress": True},
     }
@@ -301,7 +302,11 @@ def create_app(
     cookies_file = library_root.parent / "cookies.txt"  # data/cookies.txt
     _write_cookies_from_env(cookies_file)
     cdn_proxy = CdnProxy(cookies_file)
-    gallerydl_config_path = library_root.parent.parent / "config" / "gallery-dl.json"
+    gallerydl_config_path = (
+        library_root.parent.parent / "config" / "gallery-dl.json"
+        if portable_root() is not None
+        else library_root.parent / "config" / "gallery-dl.json"
+    )
     _fav_authors_path = library_root.parent.parent / "config" / "favorite_authors.json"
     _ensure_gallerydl_config(gallerydl_config_path, library_root)
     timeline_refresher = TimelineRefresher(db, gallerydl_config_path)
