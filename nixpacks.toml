@@ -5,9 +5,11 @@ nixPkgs = ["ffmpeg"]
 
 [phases.install]
 cmds = [
-    "pip install uv",
-    "uv pip install --system .",
+    "pip install fastapi 'uvicorn[standard]' gallery-dl httpx imagehash pillow",
 ]
+
+[variables]
+PYTHONPATH = "/app/src"
 
 [start]
 cmd = "uvicorn xlikes_viewer.server:app --host 0.0.0.0 --port $PORT"
