@@ -836,5 +836,4 @@ def _module_level_app() -> FastAPI:
     return create_app(library_root=library_root)
 
 
-import os as _os; print(f"[ARCHIVE] ENV_KEYS={[k for k in _os.environ if k.startswith("ARCHIVE")]}", flush=True)
 app = _module_level_app()
