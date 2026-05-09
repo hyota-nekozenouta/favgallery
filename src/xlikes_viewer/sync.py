@@ -122,6 +122,7 @@ class SyncRunner:
         assert self._library_root is not None  # noqa: S101 — caller guarantee
         library = self._library_root
         uploaded_paths: list[Path] = []
+        already_in_r2: list[Path] = []
         skipped = 0
         for media_path in library.rglob("*"):
             if not media_path.is_file():
@@ -134,6 +135,8 @@ class SyncRunner:
                 continue
             key = rel.as_posix()
             if self._r2_client.object_exists(key):
+                # Already in R2 — mark for local deletion to free Railway volume space.
+                already_in_r2.append(media_path)
                 skipped += 1
                 continue
             try:
@@ -145,10 +148,10 @@ class SyncRunner:
         self.state.log_lines.append(
             f"[r2] upload complete: {uploaded} uploaded, {skipped} already present"
         )
-        # Delete successfully uploaded files to reclaim Railway volume space.
+        # Delete successfully uploaded files AND files already in R2 to reclaim Railway volume.
         # Files that failed to upload are intentionally kept.
         deleted = 0
-        for path in uploaded_paths:
+        for path in uploaded_paths + already_in_r2:
             try:
                 path.unlink()
                 deleted += 1
