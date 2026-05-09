@@ -1,24 +1,20 @@
-"""Trigger and observe `xlikes.exe` runs from the viewer process."""
+"""Trigger and observe gallery-dl runs from the viewer process."""
 
 from __future__ import annotations
 
-import os
-import subprocess
+import logging
 import threading
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import time
+from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from xlikes_viewer.db import Database
 
-def _default_exe() -> Path:
-    from xlikes_viewer.paths import default_xlikes_exe
-
-    return default_xlikes_exe()
-
-
-XLIKES_EXE = _default_exe()
 LOG_RING_SIZE = 200
+_MY_USERNAME_KEY = "my_username"
 
 
 @dataclass
@@ -33,18 +29,53 @@ class SyncState:
     log_lines: deque[str] = field(default_factory=lambda: deque(maxlen=LOG_RING_SIZE))
 
 
-class SyncRunner:
-    """Single-flight runner: at most one xlikes.exe child at a time."""
+class _DequeHandler(logging.Handler):
+    """Logging handler that appends formatted records to a deque."""
 
-    def __init__(self, exe_path: Path = XLIKES_EXE) -> None:
-        self.exe_path = exe_path
+    def __init__(self, target: deque[str]) -> None:
+        super().__init__()
+        self._target = target
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self._target.append(self.format(record))
+        except Exception:
+            self.handleError(record)
+
+
+class _NullContext:
+    """No-op context manager used when no external lock is provided."""
+
+    def __enter__(self) -> _NullContext:
+        return self
+
+    def __exit__(self, *_: Any) -> None:
+        pass
+
+
+class SyncRunner:
+    """Single-flight runner: at most one gallery-dl sync at a time."""
+
+    def __init__(
+        self,
+        config_path: Path,
+        db: Database,
+        *,
+        gdl_lock: threading.Lock | None = None,
+    ) -> None:
+        self.config_path = config_path
+        self._db = db
+        # Optional external lock to serialize gallery-dl's global config writes
+        # with other gallery-dl callers in the same process.
+        self._gdl_lock = gdl_lock
         self.state = SyncState()
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
-        self._proc: subprocess.Popen[str] | None = None
+        self._stop_event = threading.Event()
 
     def is_runnable(self) -> bool:
-        return self.exe_path.exists()
+        """gallery-dl is always available (installed via pip on Railway)."""
+        return True
 
     def start(self, *, extra_args: list[str] | None = None) -> bool:
         """Kick off a sync if none is in flight. Returns False if already running."""
@@ -52,7 +83,6 @@ class SyncRunner:
             if self.state.running:
                 return False
             if not self.is_runnable():
-                self.state.last_error = f"xlikes.exe not found at {self.exe_path}"
                 return False
             self.state.running = True
             self.state.started_at = time()
@@ -60,53 +90,58 @@ class SyncRunner:
             self.state.last_return_code = None
             self.state.last_error = None
             self.state.log_lines.clear()
-            self._thread = threading.Thread(
-                target=self._worker, args=(extra_args or [],), daemon=True
-            )
+            self._stop_event.clear()
+            self._thread = threading.Thread(target=self._worker, daemon=True)
             self._thread.start()
         return True
 
     def stop(self) -> bool:
-        """Best-effort stop of the running sync."""
+        """Signal the running sync to stop at the next opportunity."""
         with self._lock:
-            proc = self._proc
-        if proc and proc.poll() is None:
-            proc.terminate()
+            running = self.state.running
+        if running:
+            self._stop_event.set()
             return True
         return False
 
-    def _worker(self, extra_args: list[str]) -> None:
-        cmd = [str(self.exe_path), *extra_args]
-        env = os.environ.copy()
-        env["PYTHONIOENCODING"] = "utf-8"
+    def _worker(self) -> None:
+        from gallery_dl import job as gdl_job  # type: ignore[import-untyped]
+
+        from xlikes_viewer.gallerydl import prepare_config
+
+        gdl_logger = logging.getLogger("gallery_dl")
+        handler = _DequeHandler(self.state.log_lines)
+        handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+        gdl_logger.addHandler(handler)
+
+        rc = 0
+        err: str | None = None
         try:
-            with subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            ) as proc:
-                with self._lock:
-                    self._proc = proc
-                assert proc.stdout is not None
-                for line in proc.stdout:
-                    self.state.log_lines.append(line.rstrip())
-                rc = proc.wait()
+            username = (self._db.get_setting(_MY_USERNAME_KEY) or "").strip()
+            if not username:
+                raise RuntimeError(
+                    "X username not set — configure it via POST /api/me"
+                )
+            if self._stop_event.is_set():
+                rc = 130  # interrupted before start
+                return
+
+            url = f"https://x.com/{username}/likes"
+            self.state.log_lines.append(f"[sync] starting: {url}")
+
+            ctx: Any = self._gdl_lock if self._gdl_lock is not None else _NullContext()
+            with ctx:
+                prepare_config(self.config_path, archive=..., twitter_retweets=False)
+                gdl_job.DownloadJob(url).run()
+
+            self.state.log_lines.append("[sync] complete")
         except Exception as exc:
+            err = f"{type(exc).__name__}: {exc}"
+            rc = -1
+        finally:
+            gdl_logger.removeHandler(handler)
             with self._lock:
                 self.state.running = False
                 self.state.finished_at = time()
-                self.state.last_return_code = -1
-                self.state.last_error = f"{type(exc).__name__}: {exc}"
-                self._proc = None
-            return
-
-        with self._lock:
-            self.state.running = False
-            self.state.finished_at = time()
-            self.state.last_return_code = rc
-            self._proc = None
+                self.state.last_return_code = rc
+                self.state.last_error = err

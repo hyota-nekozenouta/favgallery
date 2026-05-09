@@ -203,7 +203,6 @@ class TimelineRefresher:
                 post = _post_from_meta(u, meta, now)
                 if post is None:
                     continue
-                # Skip video for the first cut: HLS streaming proxy is non-trivial.
                 if post.media_type not in DISPLAYABLE_MEDIA_TYPES:
                     continue
                 self.db.upsert_timeline_post(post)

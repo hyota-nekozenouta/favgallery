@@ -105,10 +105,12 @@ def test_refresher_runs_via_mocked_fetch(db: Database, tmp_path: Path) -> None:
 
             time.sleep(0.05)
     total, posts = db.list_timeline_posts(limit=10, offset=0)
-    # Video is filtered out in the first cut.
-    assert total == 1
-    assert posts[0].tweet_id == "1"
-    assert r.state.last_added == 1
+    # Both photo and video are displayable media types.
+    assert total == 2
+    tweet_ids = {p.tweet_id for p in posts}
+    assert "1" in tweet_ids
+    assert "2" in tweet_ids
+    assert r.state.last_added == 2
     assert r.state.last_error is None
 
 

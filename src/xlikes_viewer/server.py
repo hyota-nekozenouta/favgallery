@@ -295,8 +295,6 @@ def create_app(
     else:
         _initial_scan()
 
-    sync_runner = SyncRunner()
-    app.state.sync_runner = sync_runner
     app.state.library_root = library_root
 
     db = Database(library_root / "xlikes.sqlite")
@@ -402,6 +400,11 @@ def create_app(
 
     # Serialize gallery-dl invocations: prepare_config touches global state.
     unliked_lock = threading.Lock()
+
+    # SyncRunner shares the same serialization lock so prepare_config calls
+    # from concurrent gallery-dl users don't trample each other.
+    sync_runner = SyncRunner(config_path=gallerydl_config_path, db=db, gdl_lock=unliked_lock)
+    app.state.sync_runner = sync_runner
 
     @app.get("/api/authors/{author}/unliked")
     def api_author_unliked(
@@ -740,8 +743,7 @@ def create_app(
                 "finished_at": s.finished_at,
                 "return_code": s.last_return_code,
                 "error": s.last_error,
-                "exe_present": sync_runner.is_runnable(),
-                "exe_path": str(sync_runner.exe_path),
+                "exe_present": True,  # gallery-dl is always available
                 "log_tail": list(s.log_lines)[-40:],
             }
         )

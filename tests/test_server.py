@@ -485,14 +485,15 @@ def test_sync_start_returns_400_when_cookies_missing(
 def test_sync_start_not_400_when_cookies_present(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path
 ) -> None:
-    """POST /api/sync/start must not return 400 when cookies.txt exists (exe missing → 409)."""
+    """POST /api/sync/start must not return 400 when cookies.txt exists."""
     monkeypatch.delenv("GALLERY_DL_COOKIES", raising=False)
     cookies_path = fake_library.parent / "cookies.txt"
     cookies_path.write_text("# cookies\n", encoding="utf-8")
     app = create_app(library_root=fake_library, scan_in_background=False)
     client = TestClient(app)
     r = client.post("/api/sync/start")
-    # cookies.txt present → 400 must NOT be returned (exe missing → 409 expected)
+    # cookies.txt present → 400 must NOT be returned
+    # gallery-dl is always available so sync starts (200) or fails with 409 if already running
     assert r.status_code != 400
 
 
