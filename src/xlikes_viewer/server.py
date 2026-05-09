@@ -798,6 +798,18 @@ def create_app(
         result = sync_runner.cleanup_local()
         return JSONResponse(result)
 
+    @app.post("/api/admin/reset-archive-db")
+    def admin_reset_archive_db() -> JSONResponse:
+        """Delete gallery-dl's archive.sqlite so the next sync re-downloads everything.
+
+        Protected by the existing Basic auth middleware.
+        """
+        archive_db = library_root / "archive.sqlite"
+        if archive_db.exists():
+            archive_db.unlink()
+            return JSONResponse({"deleted": True, "path": str(archive_db)})
+        return JSONResponse({"deleted": False, "path": str(archive_db)})
+
     # --- Dedup --------------------------------------------------------
 
     @app.post("/api/dedup/run")
