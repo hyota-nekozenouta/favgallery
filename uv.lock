@@ -1165,6 +1165,7 @@ name = "xlikes-viewer"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "boto3" },
     { name = "fastapi" },
     { name = "gallery-dl" },
     { name = "httpx" },
@@ -1192,6 +1193,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "boto3", specifier = ">=1.38.0" },
     { name = "boto3", marker = "extra == 'cloud'", specifier = ">=1.38.0" },
     { name = "fastapi", specifier = ">=0.136.1" },
     { name = "gallery-dl", specifier = ">=1.32.1" },
