@@ -783,6 +783,21 @@ def create_app(
     def sync_stop() -> JSONResponse:
         return JSONResponse({"stopped": sync_runner.stop()})
 
+    # --- Admin --------------------------------------------------------
+
+    @app.post("/api/admin/cleanup-local")
+    def admin_cleanup_local() -> JSONResponse:
+        """Delete local media files that are already present in R2.
+
+        Protected by the existing Basic auth middleware (ARCHIVE_USER / ARCHIVE_PASSWORD).
+        Safe to call after a sync completes or any time R2 is populated.
+        Returns ``{"deleted": n, "checked": n, "errors": n}``.
+        """
+        if r2_client is None:
+            raise HTTPException(status_code=503, detail="R2 not configured")
+        result = sync_runner.cleanup_local()
+        return JSONResponse(result)
+
     # --- Dedup --------------------------------------------------------
 
     @app.post("/api/dedup/run")

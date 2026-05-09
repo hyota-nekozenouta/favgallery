@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 LOG_RING_SIZE = 200
 _MY_USERNAME_KEY = "my_username"
+_MEDIA_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".mp4", ".mov", ".webm", ".webp"}
 
 
 @dataclass
@@ -114,31 +115,81 @@ class SyncRunner:
 
         Uses the relative path (forward-slashed, relative to library_root) as
         the R2 object key so that ``/api/media/{rel_path}`` can retrieve it.
-        Skips ``.json`` sidecars — only uploads the actual media files.
+        Skips ``.json`` sidecars and ``thumbs/`` subdirectories.
+        After upload, deletes successfully uploaded files to free local disk space.
         """
         assert self._r2_client is not None  # noqa: S101 — caller guarantee
         assert self._library_root is not None  # noqa: S101 — caller guarantee
         library = self._library_root
-        media_extensions = {".jpg", ".jpeg", ".png", ".gif", ".mp4", ".mov", ".webm"}
-        uploaded = 0
+        uploaded_paths: list[Path] = []
         skipped = 0
         for media_path in library.rglob("*"):
             if not media_path.is_file():
                 continue
-            if media_path.suffix.lower() not in media_extensions:
+            rel = media_path.relative_to(library)
+            if media_path.suffix.lower() not in _MEDIA_EXTENSIONS:
                 continue
-            key = media_path.relative_to(library).as_posix()
+            # Skip thumbnails stored under any thumbs/ subdirectory.
+            if "thumbs" in rel.parts[:-1]:
+                continue
+            key = rel.as_posix()
             if self._r2_client.object_exists(key):
                 skipped += 1
                 continue
             try:
                 self._r2_client.upload_file(media_path, key)
-                uploaded += 1
+                uploaded_paths.append(media_path)
             except Exception as exc:
                 self.state.log_lines.append(f"[r2] upload failed for {key}: {exc}")
+        uploaded = len(uploaded_paths)
         self.state.log_lines.append(
             f"[r2] upload complete: {uploaded} uploaded, {skipped} already present"
         )
+        # Delete successfully uploaded files to reclaim Railway volume space.
+        # Files that failed to upload are intentionally kept.
+        deleted = 0
+        for path in uploaded_paths:
+            try:
+                path.unlink()
+                deleted += 1
+            except OSError as exc:
+                self.state.log_lines.append(
+                    f"[r2] local delete failed for {path.name}: {exc}"
+                )
+        if deleted:
+            self.state.log_lines.append(f"[r2] local cleanup: {deleted} files deleted")
+
+    def cleanup_local(self) -> dict[str, int]:
+        """Delete local media files that are already present in R2.
+
+        Called by ``/api/admin/cleanup-local`` to reclaim disk space on demand.
+        Safe to run at any time; only removes files confirmed to exist in R2.
+        Returns counts: ``{"deleted": n, "checked": n, "errors": n}``.
+        """
+        if self._r2_client is None or self._library_root is None:
+            return {"deleted": 0, "checked": 0, "errors": 0}
+        library = self._library_root
+        deleted = 0
+        checked = 0
+        errors = 0
+        for media_path in library.rglob("*"):
+            if not media_path.is_file():
+                continue
+            rel = media_path.relative_to(library)
+            if media_path.suffix.lower() not in _MEDIA_EXTENSIONS:
+                continue
+            if "thumbs" in rel.parts[:-1]:
+                continue
+            key = rel.as_posix()
+            checked += 1
+            if not self._r2_client.object_exists(key):
+                continue
+            try:
+                media_path.unlink()
+                deleted += 1
+            except OSError:
+                errors += 1
+        return {"deleted": deleted, "checked": checked, "errors": errors}
 
     def _worker(self) -> None:
         from gallery_dl import job as gdl_job  # type: ignore[import-untyped]
