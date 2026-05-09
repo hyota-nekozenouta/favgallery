@@ -39,7 +39,6 @@ COPY src/ ./src/
 
 # Persistent volume for the media library — mount at /data in Railway
 RUN mkdir -p /data/library && chown -R appuser:appuser /data
-VOLUME ["/data"]
 
 USER appuser
 
