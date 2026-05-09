@@ -14,4 +14,4 @@ cmds = [
 
 [start]
 # PORT is automatically injected by Railway
-cmd = "uvicorn xlikes_viewer.server:app --host 0.0.0.0 --port $PORT"
+cmd = "uvicorn xlikes_viewer.server:app --host 0.0.0.0 --port $PORT --app-dir src"
