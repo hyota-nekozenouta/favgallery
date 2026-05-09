@@ -16,6 +16,8 @@ dependencies = [
 [project.optional-dependencies]
 # Desktop window mode (Windows only). Not needed for Railway / server deployment.
 desktop = ["pywebview>=6.2.1"]
+# Cloudflare R2 / S3-compatible storage backend.
+cloud = ["boto3>=1.38.0"]
 
 [project.scripts]
 xlikes-viewer = "xlikes_viewer.cli:main"

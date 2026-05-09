@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from xlikes_viewer.db import Database
+    from xlikes_viewer.r2 import R2Client
 
 LOG_RING_SIZE = 200
 _MY_USERNAME_KEY = "my_username"
@@ -62,12 +63,16 @@ class SyncRunner:
         db: Database,
         *,
         gdl_lock: threading.Lock | None = None,
+        library_root: Path | None = None,
+        r2_client: R2Client | None = None,
     ) -> None:
         self.config_path = config_path
         self._db = db
         # Optional external lock to serialize gallery-dl's global config writes
         # with other gallery-dl callers in the same process.
         self._gdl_lock = gdl_lock
+        self._library_root = library_root
+        self._r2_client = r2_client
         self.state = SyncState()
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
@@ -104,6 +109,37 @@ class SyncRunner:
             return True
         return False
 
+    def _upload_library_to_r2(self) -> None:
+        """Upload any media file in library_root that is not yet in R2.
+
+        Uses the relative path (forward-slashed, relative to library_root) as
+        the R2 object key so that ``/api/media/{rel_path}`` can retrieve it.
+        Skips ``.json`` sidecars — only uploads the actual media files.
+        """
+        assert self._r2_client is not None  # noqa: S101 — caller guarantee
+        assert self._library_root is not None  # noqa: S101 — caller guarantee
+        library = self._library_root
+        media_extensions = {".jpg", ".jpeg", ".png", ".gif", ".mp4", ".mov", ".webm"}
+        uploaded = 0
+        skipped = 0
+        for media_path in library.rglob("*"):
+            if not media_path.is_file():
+                continue
+            if media_path.suffix.lower() not in media_extensions:
+                continue
+            key = media_path.relative_to(library).as_posix()
+            if self._r2_client.object_exists(key):
+                skipped += 1
+                continue
+            try:
+                self._r2_client.upload_file(media_path, key)
+                uploaded += 1
+            except Exception as exc:
+                self.state.log_lines.append(f"[r2] upload failed for {key}: {exc}")
+        self.state.log_lines.append(
+            f"[r2] upload complete: {uploaded} uploaded, {skipped} already present"
+        )
+
     def _worker(self) -> None:
         from gallery_dl import job as gdl_job  # type: ignore[import-untyped]
 
@@ -135,6 +171,8 @@ class SyncRunner:
                 gdl_job.DownloadJob(url).run()
 
             self.state.log_lines.append("[sync] complete")
+            if self._r2_client is not None and self._library_root is not None:
+                self._upload_library_to_r2()
         except Exception as exc:
             err = f"{type(exc).__name__}: {exc}"
             rc = -1

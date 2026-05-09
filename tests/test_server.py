@@ -106,7 +106,7 @@ def test_posts_endpoint_returns_paginated(client: TestClient) -> None:
     assert data["total"] == 4
     assert len(data["items"]) == 2
     item = data["items"][0]
-    assert item["media_url"].startswith("/media/")
+    assert item["media_url"].startswith("/api/media/")
     assert item["thumb_url"].startswith("/thumb/")
     assert item["tweet_url"].startswith("https://x.com/")
 
@@ -136,15 +136,16 @@ def test_posts_filter_combines_author_and_tag(client: TestClient) -> None:
 @pytest.mark.integration
 def test_media_endpoint_serves_file(client: TestClient) -> None:
     posts = client.get("/api/posts").json()["items"]
-    rel = posts[0]["media_url"].removeprefix("/media/")
-    r = client.get(f"/media/{rel}")
+    media_url = posts[0]["media_url"]
+    assert media_url.startswith("/api/media/")
+    r = client.get(media_url)
     assert r.status_code == 200
     assert r.headers["content-type"].startswith(("image/", "video/", "application/"))
 
 
 @pytest.mark.integration
 def test_media_endpoint_rejects_path_escape(client: TestClient) -> None:
-    r = client.get("/media/../../etc/passwd")
+    r = client.get("/api/media/../../etc/passwd")
     assert r.status_code in (400, 404)
 
 

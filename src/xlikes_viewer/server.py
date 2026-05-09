@@ -22,6 +22,7 @@ from xlikes_viewer.db import Database, TimelinePost
 from xlikes_viewer.dedup import DedupRunner, VisualDedupRunner
 from xlikes_viewer.like import like_tweet
 from xlikes_viewer.proxy import CdnProxy, is_allowed
+from xlikes_viewer.r2 import R2Client, r2_config_from_env
 from xlikes_viewer.save_one import save_tweet
 from xlikes_viewer.scanner import DEFAULT_LIBRARY, Index, Post, scan_library
 from xlikes_viewer.sync import SyncRunner
@@ -179,7 +180,7 @@ def _post_payload(p: Post) -> dict:
     return _base_payload(
         tweet_id=p.tweet_id,
         num=p.num,
-        media_url=f"/media/{p.rel_media}",
+        media_url=f"/api/media/{p.rel_media}",
         thumb_url=f"/thumb/{p.rel_media}",
         media_type=p.media_type,
         extension=p.extension,
@@ -301,6 +302,10 @@ def create_app(
     db = Database(library_root / "xlikes.sqlite")
     cookies_file = library_root.parent / "cookies.txt"  # data/cookies.txt
     _write_cookies_from_env(cookies_file)
+
+    r2_cfg = r2_config_from_env()
+    r2_client: R2Client | None = R2Client(r2_cfg) if r2_cfg is not None else None
+    app.state.r2_client = r2_client
     cdn_proxy = CdnProxy(cookies_file)
     gallerydl_config_path = (
         library_root.parent.parent / "config" / "gallery-dl.json"
@@ -408,7 +413,13 @@ def create_app(
 
     # SyncRunner shares the same serialization lock so prepare_config calls
     # from concurrent gallery-dl users don't trample each other.
-    sync_runner = SyncRunner(config_path=gallerydl_config_path, db=db, gdl_lock=unliked_lock)
+    sync_runner = SyncRunner(
+        config_path=gallerydl_config_path,
+        db=db,
+        gdl_lock=unliked_lock,
+        library_root=library_root,
+        r2_client=r2_client,
+    )
     app.state.sync_runner = sync_runner
 
     @app.get("/api/authors/{author}/unliked")
@@ -821,6 +832,14 @@ def create_app(
 
     # --- Media (likes archive) ----------------------------------------
 
+    def _validate_rel_path(rel_path: str) -> None:
+        """Raise HTTPException if rel_path attempts to escape library_root."""
+        target = (library_root / rel_path).resolve()
+        try:
+            target.relative_to(library_root_resolved)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail="path escape") from e
+
     def _resolve_under_library(rel_path: str) -> Path:
         target = (library_root / rel_path).resolve()
         try:
@@ -830,6 +849,23 @@ def create_app(
         if not target.is_file():
             raise HTTPException(status_code=404, detail="not found")
         return target
+
+    @app.get("/api/media/{rel_path:path}")
+    async def api_media(rel_path: str) -> Response:
+        """Serve media from R2 when configured, otherwise from the local library."""
+        _validate_rel_path(rel_path)
+        if r2_client is not None:
+            try:
+                content_length, content_type, body_iter = r2_client.stream_object(rel_path)
+                headers = {"content-length": str(content_length)} if content_length else {}
+                return StreamingResponse(body_iter, media_type=content_type, headers=headers)
+            except Exception:
+                # Fall through to local filesystem if key is absent in R2.
+                pass
+        target = (library_root / rel_path).resolve()
+        if not target.is_file():
+            raise HTTPException(status_code=404, detail="not found")
+        return FileResponse(target)
 
     @app.get("/media/{rel_path:path}")
     def media(rel_path: str) -> FileResponse:
