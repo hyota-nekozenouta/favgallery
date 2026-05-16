@@ -109,7 +109,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         import webview
 
         webview.create_window(
-            "xlikes Viewer",
+            "Archive",
             url,
             width=1400,
             height=900,

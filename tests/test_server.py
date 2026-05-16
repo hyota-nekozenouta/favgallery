@@ -82,7 +82,7 @@ def client(fake_library: Path) -> TestClient:
 def test_index_html_served(client: TestClient) -> None:
     r = client.get("/")
     assert r.status_code == 200
-    assert "xlikes" in r.text.lower()
+    assert "archive" in r.text.lower()
 
 
 @pytest.mark.integration

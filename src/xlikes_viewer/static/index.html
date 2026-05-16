@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>xlikes Viewer</title>
+  <title>Archive</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body { background: #0a0a0d; color: #e6e6ea; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif; }
@@ -36,8 +36,8 @@
     .like-btn { right: 48px; }
     .del-btn { right: 48px; }   /* takes the slot when like-btn is hidden */
     .list-star {
-      position: absolute; top: 6px; right: 6px;
-      font-size: 13px; color: #facc15; line-height: 1;
+      position: absolute; top: 6px; left: 6px;
+      font-size: 28px; color: #facc15; line-height: 1;
       text-shadow: 0 1px 3px rgba(0,0,0,.8);
       pointer-events: none; z-index: 3;
     }
@@ -175,7 +175,7 @@
     <aside id="app-sidebar" class="w-72 border-r border-zinc-800 flex flex-col">
       <div class="px-4 py-3 border-b border-zinc-800">
         <div class="flex items-center gap-2">
-          <div class="text-lg font-semibold tracking-tight">xlikes</div>
+          <div class="text-lg font-semibold tracking-tight">Archive</div>
           <span class="text-xs text-zinc-500" id="postCount"></span>
           <div class="flex-1"></div>
           <span id="loadingIndicator" class="hidden text-base leading-none select-none">⏳</span>

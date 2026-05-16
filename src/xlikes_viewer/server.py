@@ -274,7 +274,7 @@ def create_app(
     *,
     scan_in_background: bool = True,
 ) -> FastAPI:
-    app = FastAPI(title="xlikes Viewer", version="0.2.0")
+    app = FastAPI(title="Archive", version="0.2.0")
     app.middleware("http")(_make_basic_auth_middleware())
     # Heavy `scan_library` walk goes on a background thread by default so the
     # window can paint immediately; the frontend polls `scanning=True` via
@@ -415,6 +415,11 @@ def create_app(
     # Serialize gallery-dl invocations: prepare_config touches global state.
     unliked_lock = threading.Lock()
 
+    def _after_sync() -> None:
+        """Refresh index and auto-run dedup after a successful sync."""
+        _refresh_index()
+        dedup_runner.start()
+
     # SyncRunner shares the same serialization lock so prepare_config calls
     # from concurrent gallery-dl users don't trample each other.
     sync_runner = SyncRunner(
@@ -423,6 +428,7 @@ def create_app(
         gdl_lock=unliked_lock,
         library_root=library_root,
         r2_client=r2_client,
+        on_complete=_after_sync,
     )
     app.state.sync_runner = sync_runner
 
@@ -717,6 +723,9 @@ def create_app(
                 author_name=body.author_name,
                 tweet_id=body.tweet_id,
             )
+            if save_result.ok:
+                # Refresh the in-memory index so the new file appears in /api/posts
+                _refresh_index()
         return JSONResponse(
             {
                 "liked": like_result.ok,

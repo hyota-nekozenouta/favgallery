@@ -66,6 +66,7 @@ class SyncRunner:
         gdl_lock: threading.Lock | None = None,
         library_root: Path | None = None,
         r2_client: R2Client | None = None,
+        on_complete: Any | None = None,
     ) -> None:
         self.config_path = config_path
         self._db = db
@@ -74,6 +75,7 @@ class SyncRunner:
         self._gdl_lock = gdl_lock
         self._library_root = library_root
         self._r2_client = r2_client
+        self._on_complete = on_complete  # callable() invoked after successful sync
         self.state = SyncState()
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
@@ -238,6 +240,11 @@ class SyncRunner:
             self.state.log_lines.append("[sync] complete")
             if self._r2_client is not None and self._library_root is not None:
                 self._upload_library_to_r2()
+            if self._on_complete is not None:
+                try:
+                    self._on_complete()
+                except Exception:
+                    logging.getLogger(__name__).warning("on_complete callback failed", exc_info=True)
         except Exception as exc:
             err = f"{type(exc).__name__}: {exc}"
             rc = -1
