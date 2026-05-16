@@ -1881,7 +1881,7 @@ async function submitBookUrl() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
     });
-    if (!r.ok) { const e = await r.json(); alert(e.detail || e.reason || 'エラー'); return; }
+    if (!r.ok) { const e = await r.json().catch(() => ({})); alert(String(e.detail || e.reason || JSON.stringify(e) || 'エラー')); return; }
 
     // Poll for status
     const poll = setInterval(async () => {
@@ -1893,7 +1893,7 @@ async function submitBookUrl() {
       if (!st.running) {
         clearInterval(poll);
         if (st.error) {
-          alert('取得失敗: ' + st.error);
+          alert('取得失敗: ' + String(st.error));
           document.getElementById('bookUploadProgress').classList.add('hidden');
           document.getElementById('bookSubmitBtn').disabled = false;
         } else {
