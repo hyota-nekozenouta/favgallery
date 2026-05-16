@@ -234,6 +234,7 @@
         <div class="flex items-center gap-1 bg-zinc-900 rounded-md p-1">
           <button id="tabLikes" class="tab-btn active">いいね</button>
           <button id="tabTimeline" class="tab-btn">フォロー中</button>
+          <button id="tabBookshelf" class="tab-btn">本棚</button>
         </div>
         <button id="layoutToggle" title="レイアウト切替"
           class="p-1.5 rounded text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors text-lg leading-none">▦</button>
@@ -267,6 +268,13 @@
       <div id="lbMedia" class="max-h-[80vh] flex items-center justify-center"></div>
       <div class="bg-zinc-900/80 rounded-lg p-4 max-w-3xl w-full text-sm" id="lbMeta"></div>
     </div>
+  </div>
+
+  <!-- Book Reader Modal -->
+  <div id="readerModal" class="fixed inset-0 bg-black hidden items-center justify-center z-[60] select-none">
+    <div class="absolute top-4 right-6 text-zinc-400 hover:text-white text-3xl cursor-pointer z-10" onclick="closeReader()">×</div>
+    <div class="absolute top-4 left-1/2 -translate-x-1/2 text-zinc-400 text-sm z-10" id="readerPageNum">1 / 1</div>
+    <img id="readerImg" src="" alt="" class="max-w-full max-h-full object-contain cursor-pointer" />
   </div>
 
   <!-- List popover (single shared instance) -->
@@ -375,16 +383,21 @@ function switchTab(tab) {
   state.tab = tab;
   $('#tabLikes').classList.toggle('active', tab === 'likes');
   $('#tabTimeline').classList.toggle('active', tab === 'timeline');
+  $('#tabBookshelf').classList.toggle('active', tab === 'bookshelf');
   $('#timelineRefreshBtn').classList.toggle('hidden', tab !== 'timeline');
   $('#markSeenBtn').classList.toggle('hidden', tab !== 'timeline');
   exitUnlikedMode();
   state.offset = 0; state.posts = []; state.dividerInserted = false;
   setupSeenObserver();          // turn observer on for timeline, off otherwise
-  fetchPosts();
-  // No auto-refresh: user clicks the explicit sync / refresh buttons.
+  if (tab === 'bookshelf') {
+    fetchBooks();
+  } else {
+    fetchPosts();
+  }
 }
 $('#tabLikes').addEventListener('click', () => switchTab('likes'));
 $('#tabTimeline').addEventListener('click', () => switchTab('timeline'));
+$('#tabBookshelf').addEventListener('click', () => switchTab('bookshelf'));
 
 function updateReelHeight() {
   const h = document.getElementById('grid').clientHeight;
@@ -1729,6 +1742,165 @@ async function loadFavoriteAuthors() {
   } catch { /* network error during sync start — ignore */ }
   await pollSync();
 })();
+
+// --- Bookshelf ---------------------------------------------------
+state.books = [];
+
+async function fetchBooks() {
+  const r = await fetch('/api/books');
+  state.books = await r.json();
+  renderBooks();
+}
+
+function renderBooks() {
+  const m = $('#masonry');
+  const addBtn = `<div class="tile cursor-pointer flex items-center justify-center border-2 border-dashed border-zinc-700 hover:border-indigo-500 rounded-lg" style="min-height:200px" id="bookAddTile">
+    <div class="text-center text-zinc-500 hover:text-indigo-400">
+      <div class="text-4xl mb-2">+</div>
+      <div class="text-sm">漫画を追加</div>
+    </div>
+  </div>`;
+  const tiles = state.books.map(b => {
+    const cover = b.cover_path ? `/thumb/${b.cover_path}?size=400` : '';
+    return `<div class="tile cursor-pointer" data-book-id="${b.id}">
+      ${cover ? `<img src="${cover}" loading="lazy" alt="" />` : '<div class="bg-zinc-800 w-full" style="min-height:200px"></div>'}
+      <div class="info" style="opacity:1;position:relative;padding:8px 10px;background:rgba(0,0,0,.7)">
+        <div class="truncate font-medium">${escapeHtml(b.title)}</div>
+        <div class="text-zinc-400 text-xs">${b.page_count} ページ</div>
+      </div>
+    </div>`;
+  }).join('');
+  m.innerHTML = addBtn + tiles;
+
+  // Add button click
+  document.getElementById('bookAddTile')?.addEventListener('click', openBookUpload);
+
+  // Book tile clicks
+  m.querySelectorAll('.tile[data-book-id]').forEach(el => {
+    el.addEventListener('click', () => openReader(parseInt(el.dataset.bookId, 10)));
+  });
+}
+
+// --- Book Upload ---
+function openBookUpload() {
+  const modal = document.createElement('div');
+  modal.id = 'bookUploadModal';
+  modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-50';
+  modal.innerHTML = `
+    <div class="bg-zinc-900 rounded-xl p-6 w-full max-w-md shadow-2xl">
+      <h2 class="text-lg font-semibold mb-4">漫画を追加</h2>
+      <label class="block text-sm text-zinc-400 mb-1">タイトル</label>
+      <input id="bookTitle" type="text" class="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 mb-4 text-white" placeholder="タイトルを入力" />
+      <label class="block text-sm text-zinc-400 mb-1">画像ファイル（複数選択）</label>
+      <input id="bookFiles" type="file" multiple accept="image/*" class="w-full text-sm text-zinc-300 mb-2 file:mr-3 file:rounded file:border-0 file:bg-indigo-600 file:px-3 file:py-1.5 file:text-white file:cursor-pointer" />
+      <p class="text-xs text-zinc-500 mb-4">フォルダ内の画像をまとめて選択してください。ファイル名順にページが並びます。</p>
+      <div id="bookUploadProgress" class="hidden mb-4">
+        <div class="w-full bg-zinc-700 rounded-full h-2"><div id="bookProgressBar" class="bg-indigo-500 h-2 rounded-full transition-all" style="width:0%"></div></div>
+        <p class="text-xs text-zinc-400 mt-1" id="bookProgressText">アップロード中...</p>
+      </div>
+      <div class="flex gap-3 justify-end">
+        <button id="bookCancelBtn" class="px-4 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-sm">キャンセル</button>
+        <button id="bookSubmitBtn" class="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-sm font-medium">追加</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  modal.querySelector('#bookCancelBtn').addEventListener('click', () => modal.remove());
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+  modal.querySelector('#bookSubmitBtn').addEventListener('click', submitBook);
+}
+
+async function submitBook() {
+  const title = document.getElementById('bookTitle').value.trim();
+  const fileInput = document.getElementById('bookFiles');
+  if (!title) { alert('タイトルを入力してください'); return; }
+  if (!fileInput.files.length) { alert('ファイルを選択してください'); return; }
+
+  const form = new FormData();
+  form.append('title', title);
+  for (const f of fileInput.files) form.append('files', f);
+
+  document.getElementById('bookUploadProgress').classList.remove('hidden');
+  document.getElementById('bookSubmitBtn').disabled = true;
+
+  try {
+    const r = await fetch('/api/books', { method: 'POST', body: form });
+    if (!r.ok) { const e = await r.json(); alert(e.detail || 'エラー'); return; }
+    document.getElementById('bookUploadModal')?.remove();
+    await fetchBooks();
+  } catch (e) {
+    alert('アップロード失敗: ' + e.message);
+  }
+}
+
+// --- Book Reader ---
+state.reader = { bookId: null, pages: [], pos: 0 };
+
+async function openReader(bookId) {
+  const r = await fetch(`/api/books/${bookId}`);
+  const data = await r.json();
+  state.reader = { bookId, pages: data.pages, pos: 0 };
+  document.getElementById('readerModal').classList.remove('hidden');
+  document.getElementById('readerModal').classList.add('flex');
+  renderReaderPage();
+}
+
+function closeReader() {
+  document.getElementById('readerModal').classList.add('hidden');
+  document.getElementById('readerModal').classList.remove('flex');
+}
+
+function renderReaderPage() {
+  const { pages, pos } = state.reader;
+  if (!pages.length) return;
+  const p = pages[pos];
+  const img = document.getElementById('readerImg');
+  img.src = `/media/${p.rel_path}`;
+  document.getElementById('readerPageNum').textContent = `${pos + 1} / ${pages.length}`;
+}
+
+function readerGo(delta) {
+  const n = state.reader.pages.length;
+  if (n === 0) return;
+  state.reader.pos = Math.max(0, Math.min(n - 1, state.reader.pos + delta));
+  renderReaderPage();
+}
+
+// Reader keyboard & touch
+document.addEventListener('keydown', (e) => {
+  if (document.getElementById('readerModal').classList.contains('hidden')) return;
+  if (e.key === 'Escape') { closeReader(); e.preventDefault(); }
+  if (e.key === 'ArrowRight') { readerGo(1); e.preventDefault(); }
+  if (e.key === 'ArrowLeft') { readerGo(-1); e.preventDefault(); }
+});
+
+// Touch swipe for reader
+(function() {
+  let startX = 0, startY = 0, tracking = false;
+  const modal = document.getElementById('readerModal');
+  modal.addEventListener('touchstart', (e) => {
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    tracking = true;
+  });
+  modal.addEventListener('touchend', (e) => {
+    if (!tracking) return;
+    tracking = false;
+    const dx = e.changedTouches[0].clientX - startX;
+    const dy = e.changedTouches[0].clientY - startY;
+    if (Math.abs(dx) < 50 || Math.abs(dy) > Math.abs(dx)) return;
+    if (dx < 0) readerGo(1);   // swipe left = next
+    else readerGo(-1);          // swipe right = prev
+  });
+})();
+
+// Click navigation: left half = prev, right half = next
+document.getElementById('readerImg')?.addEventListener('click', (e) => {
+  const rect = e.target.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  if (x < rect.width / 2) readerGo(-1);
+  else readerGo(1);
+});
 </script>
 </body>
 </html>

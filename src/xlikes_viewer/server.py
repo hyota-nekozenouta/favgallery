@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -942,6 +942,112 @@ def create_app(
             except Exception:
                 pass
         raise HTTPException(status_code=404, detail="not found")
+
+    # --- Books (bookshelf) ------------------------------------------------
+
+    _BOOKS_DIR = "_books"
+
+    @app.get("/api/books")
+    def api_books() -> JSONResponse:
+        items = db.books()
+        return JSONResponse([
+            {"id": b.id, "title": b.title, "cover_path": b.cover_path,
+             "page_count": b.page_count, "created_at": b.created_at}
+            for b in items
+        ])
+
+    @app.get("/api/books/{book_id}")
+    def api_book_detail(book_id: int) -> JSONResponse:
+        book = db.get_book(book_id)
+        if book is None:
+            raise HTTPException(status_code=404, detail="book not found")
+        pages = db.book_pages(book_id)
+        return JSONResponse({
+            "id": book.id, "title": book.title, "cover_path": book.cover_path,
+            "page_count": book.page_count, "created_at": book.created_at,
+            "pages": [{"page_num": p.page_num, "rel_path": p.rel_path,
+                       "width": p.width, "height": p.height} for p in pages],
+        })
+
+    @app.post("/api/books")
+    async def api_create_book(
+        title: str = Form(...),
+        files: list[UploadFile] = File(...),
+    ) -> JSONResponse:
+        if not files:
+            raise HTTPException(status_code=400, detail="no files provided")
+
+        # Sort files by filename for natural page order
+        import re
+        def _natural_key(name: str) -> list:
+            return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', name)]
+
+        sorted_files = sorted(files, key=lambda f: _natural_key(f.filename or ""))
+
+        # Create book record first to get ID
+        book = db.create_book(title=title, cover_path=None, page_count=len(sorted_files))
+
+        # Save files to disk
+        book_dir = library_root / _BOOKS_DIR / str(book.id)
+        book_dir.mkdir(parents=True, exist_ok=True)
+
+        pages: list[tuple[int, str, int | None, int | None]] = []
+        cover_rel: str | None = None
+
+        for i, f in enumerate(sorted_files, start=1):
+            ext = Path(f.filename or "page.jpg").suffix.lower() or ".jpg"
+            filename = f"{i:04d}{ext}"
+            dest = book_dir / filename
+            content = await f.read()
+            dest.write_bytes(content)
+
+            rel = f"{_BOOKS_DIR}/{book.id}/{filename}"
+            if i == 1:
+                cover_rel = rel
+
+            # Try to get dimensions
+            w, h = None, None
+            try:
+                from PIL import Image
+                import io
+                img = Image.open(io.BytesIO(content))
+                w, h = img.size
+            except Exception:
+                pass
+
+            pages.append((i, rel, w, h))
+
+        db.add_book_pages(book.id, pages)
+
+        # Update cover path
+        if cover_rel:
+            with db._lock:
+                db._conn.execute("UPDATE books SET cover_path = ? WHERE id = ?", (cover_rel, book.id))
+
+        return JSONResponse({"id": book.id, "title": book.title, "page_count": len(pages)}, status_code=201)
+
+    @app.delete("/api/books/{book_id}")
+    def api_delete_book(book_id: int) -> JSONResponse:
+        # Delete files from disk
+        book_dir = library_root / _BOOKS_DIR / str(book_id)
+        if book_dir.exists():
+            import shutil
+            shutil.rmtree(book_dir, ignore_errors=True)
+        deleted = db.delete_book(book_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="book not found")
+        return JSONResponse({"deleted": True})
+
+    class _BookPatchBody(BaseModel):
+        title: str | None = None
+
+    @app.patch("/api/books/{book_id}")
+    def api_patch_book(book_id: int, body: _BookPatchBody) -> JSONResponse:
+        if body.title is not None:
+            if not db.update_book_title(book_id, body.title.strip()):
+                raise HTTPException(status_code=404, detail="book not found")
+        book = db.get_book(book_id)
+        return JSONResponse({"id": book.id, "title": book.title, "page_count": book.page_count})
 
     return app
 
