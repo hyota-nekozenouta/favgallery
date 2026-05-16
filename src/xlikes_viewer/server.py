@@ -1069,16 +1069,26 @@ def create_app(
         import tempfile
 
         tmp_dir = None
+        cfg_path = None
         try:
             tmp_dir = tempfile.mkdtemp(prefix="book_import_")
             tmp_path = Path(tmp_dir)
 
-            # Run gallery-dl to download images to temp dir
+            # Write a temporary gallery-dl config for flat output
+            cfg = {
+                "extractor": {
+                    "base-directory": tmp_dir.replace("\\", "/") + "/",
+                    "directory": [],
+                    "filename": "{num:>04}.{extension}",
+                    "postprocessors": [{"name": "metadata", "mode": "json"}],
+                }
+            }
+            cfg_path = Path(tmp_dir) / "gdl_config.json"
+            cfg_path.write_text(_json.dumps(cfg), encoding="utf-8")
+
             cmd = [
                 "gallery-dl",
-                "--dest", tmp_dir,
-                "--option", "directory=[]",
-                "--option", "filename={num:>04}.{extension}",
+                "--config", str(cfg_path),
                 url,
             ]
             with import_lock:
