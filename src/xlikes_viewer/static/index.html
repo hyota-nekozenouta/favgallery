@@ -1792,14 +1792,25 @@ function openBookUpload() {
   modal.innerHTML = `
     <div class="bg-zinc-900 rounded-xl p-6 w-full max-w-md shadow-2xl">
       <h2 class="text-lg font-semibold mb-4">漫画を追加</h2>
-      <label class="block text-sm text-zinc-400 mb-1">タイトル</label>
-      <input id="bookTitle" type="text" class="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 mb-4 text-white" placeholder="タイトルを入力" />
-      <label class="block text-sm text-zinc-400 mb-1">画像ファイル（複数選択）</label>
-      <input id="bookFiles" type="file" multiple accept="image/*" class="w-full text-sm text-zinc-300 mb-2 file:mr-3 file:rounded file:border-0 file:bg-indigo-600 file:px-3 file:py-1.5 file:text-white file:cursor-pointer" />
-      <p class="text-xs text-zinc-500 mb-4">フォルダ内の画像をまとめて選択してください。ファイル名順にページが並びます。</p>
+      <div class="flex gap-2 mb-4">
+        <button id="modeFile" class="px-3 py-1.5 rounded text-sm bg-indigo-600 text-white">ファイル</button>
+        <button id="modeUrl" class="px-3 py-1.5 rounded text-sm bg-zinc-700 text-zinc-300 hover:bg-zinc-600">URLから取得</button>
+      </div>
+      <div id="panelFile">
+        <label class="block text-sm text-zinc-400 mb-1">タイトル</label>
+        <input id="bookTitle" type="text" class="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 mb-4 text-white" placeholder="タイトルを入力" />
+        <label class="block text-sm text-zinc-400 mb-1">画像ファイル（複数選択）</label>
+        <input id="bookFiles" type="file" multiple accept="image/*" class="w-full text-sm text-zinc-300 mb-2 file:mr-3 file:rounded file:border-0 file:bg-indigo-600 file:px-3 file:py-1.5 file:text-white file:cursor-pointer" />
+        <p class="text-xs text-zinc-500 mb-4">フォルダ内の画像をまとめて選択してください。ファイル名順にページが並びます。</p>
+      </div>
+      <div id="panelUrl" class="hidden">
+        <label class="block text-sm text-zinc-400 mb-1">URL</label>
+        <input id="bookUrl" type="url" class="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 mb-2 text-white" placeholder="https://hitomi.la/..." />
+        <p class="text-xs text-zinc-500 mb-4">対応サイトのURLを入力すると画像を自動取得します。</p>
+      </div>
       <div id="bookUploadProgress" class="hidden mb-4">
         <div class="w-full bg-zinc-700 rounded-full h-2"><div id="bookProgressBar" class="bg-indigo-500 h-2 rounded-full transition-all" style="width:0%"></div></div>
-        <p class="text-xs text-zinc-400 mt-1" id="bookProgressText">アップロード中...</p>
+        <p class="text-xs text-zinc-400 mt-1" id="bookProgressText">処理中...</p>
       </div>
       <div class="flex gap-3 justify-end">
         <button id="bookCancelBtn" class="px-4 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-sm">キャンセル</button>
@@ -1808,9 +1819,29 @@ function openBookUpload() {
     </div>`;
   document.body.appendChild(modal);
 
+  // Tab switching
+  let mode = 'file';
+  modal.querySelector('#modeFile').addEventListener('click', () => {
+    mode = 'file';
+    modal.querySelector('#modeFile').className = 'px-3 py-1.5 rounded text-sm bg-indigo-600 text-white';
+    modal.querySelector('#modeUrl').className = 'px-3 py-1.5 rounded text-sm bg-zinc-700 text-zinc-300 hover:bg-zinc-600';
+    modal.querySelector('#panelFile').classList.remove('hidden');
+    modal.querySelector('#panelUrl').classList.add('hidden');
+  });
+  modal.querySelector('#modeUrl').addEventListener('click', () => {
+    mode = 'url';
+    modal.querySelector('#modeUrl').className = 'px-3 py-1.5 rounded text-sm bg-indigo-600 text-white';
+    modal.querySelector('#modeFile').className = 'px-3 py-1.5 rounded text-sm bg-zinc-700 text-zinc-300 hover:bg-zinc-600';
+    modal.querySelector('#panelUrl').classList.remove('hidden');
+    modal.querySelector('#panelFile').classList.add('hidden');
+  });
+
   modal.querySelector('#bookCancelBtn').addEventListener('click', () => modal.remove());
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
-  modal.querySelector('#bookSubmitBtn').addEventListener('click', submitBook);
+  modal.querySelector('#bookSubmitBtn').addEventListener('click', () => {
+    if (mode === 'file') submitBook();
+    else submitBookUrl();
+  });
 }
 
 async function submitBook() {
@@ -1833,6 +1864,48 @@ async function submitBook() {
     await fetchBooks();
   } catch (e) {
     alert('アップロード失敗: ' + e.message);
+  }
+}
+
+async function submitBookUrl() {
+  const url = document.getElementById('bookUrl').value.trim();
+  if (!url) { alert('URLを入力してください'); return; }
+
+  document.getElementById('bookUploadProgress').classList.remove('hidden');
+  document.getElementById('bookSubmitBtn').disabled = true;
+  document.getElementById('bookProgressText').textContent = '取得開始...';
+
+  try {
+    const r = await fetch('/api/books/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    if (!r.ok) { const e = await r.json(); alert(e.detail || e.reason || 'エラー'); return; }
+
+    // Poll for status
+    const poll = setInterval(async () => {
+      const sr = await fetch('/api/books/import/status');
+      const st = await sr.json();
+      document.getElementById('bookProgressText').textContent = st.progress || '処理中...';
+      if (st.title) document.getElementById('bookProgressText').textContent += ` — ${st.title}`;
+
+      if (!st.running) {
+        clearInterval(poll);
+        if (st.error) {
+          alert('取得失敗: ' + st.error);
+          document.getElementById('bookUploadProgress').classList.add('hidden');
+          document.getElementById('bookSubmitBtn').disabled = false;
+        } else {
+          document.getElementById('bookUploadModal')?.remove();
+          await fetchBooks();
+        }
+      }
+    }, 1500);
+  } catch (e) {
+    alert('リクエスト失敗: ' + e.message);
+    document.getElementById('bookUploadProgress').classList.add('hidden');
+    document.getElementById('bookSubmitBtn').disabled = false;
   }
 }
 

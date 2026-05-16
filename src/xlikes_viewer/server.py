@@ -1049,6 +1049,172 @@ def create_app(
         book = db.get_book(book_id)
         return JSONResponse({"id": book.id, "title": book.title, "page_count": book.page_count})
 
+    # --- Book Import (URL → gallery-dl → bookshelf) -----------------------
+
+    class _BookImportBody(BaseModel):
+        url: str
+
+    import_state: dict[str, object] = {
+        "running": False,
+        "error": None,
+        "book_id": None,
+        "title": "",
+        "progress": "",
+    }
+    import_lock = threading.Lock()
+
+    def _import_worker(url: str) -> None:
+        import re
+        import subprocess
+        import tempfile
+
+        tmp_dir = None
+        try:
+            tmp_dir = tempfile.mkdtemp(prefix="book_import_")
+            tmp_path = Path(tmp_dir)
+
+            # Run gallery-dl to download images to temp dir
+            cmd = [
+                "gallery-dl",
+                "--dest", tmp_dir,
+                "--option", "directory=[]",
+                "--option", "filename={num:>04}.{extension}",
+                url,
+            ]
+            with import_lock:
+                import_state["progress"] = "ダウンロード中..."
+
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=300
+            )
+
+            if result.returncode != 0:
+                with import_lock:
+                    import_state["error"] = f"gallery-dl failed: {result.stderr[:500]}"
+                    import_state["running"] = False
+                return
+
+            # Find downloaded image files
+            image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".bmp"}
+            all_files: list[Path] = []
+            for f in sorted(tmp_path.rglob("*")):
+                if f.is_file() and f.suffix.lower() in image_exts:
+                    all_files.append(f)
+
+            if not all_files:
+                with import_lock:
+                    import_state["error"] = "画像が見つか���ませんでした"
+                    import_state["running"] = False
+                return
+
+            # Extract title from URL or metadata
+            # Try to get gallery title from gallery-dl metadata json
+            title = "Imported"
+            for f in tmp_path.rglob("*.json"):
+                try:
+                    import json as _j
+                    meta = _j.loads(f.read_text(encoding="utf-8"))
+                    if isinstance(meta, dict):
+                        title = meta.get("gallery", {}).get("title", "") or meta.get("title", "") or title
+                        if title != "Imported":
+                            break
+                except Exception:
+                    pass
+
+            # Fallback: extract from URL
+            if title == "Imported":
+                from urllib.parse import unquote
+                parts = unquote(url).rsplit("/", 1)[-1].rsplit(".", 1)[0]
+                # Remove trailing ID number
+                title = re.sub(r'-\d+$', '', parts).replace('-', ' ').strip() or "Imported"
+
+            with import_lock:
+                import_state["title"] = title
+                import_state["progress"] = "本棚に登録中..."
+
+            # Natural sort helper
+            def _natural_key(name: str) -> list:
+                return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', name)]
+
+            all_files.sort(key=lambda f: _natural_key(f.name))
+
+            # Create book record
+            book = db.create_book(title=title, cover_path=None, page_count=len(all_files))
+            book_dir = library_root / _BOOKS_DIR / str(book.id)
+            book_dir.mkdir(parents=True, exist_ok=True)
+
+            pages: list[tuple[int, str, int | None, int | None]] = []
+            cover_rel: str | None = None
+
+            for i, src_file in enumerate(all_files, start=1):
+                ext = src_file.suffix.lower() or ".jpg"
+                filename = f"{i:04d}{ext}"
+                dest = book_dir / filename
+                import shutil
+                shutil.copy2(src_file, dest)
+
+                rel = f"{_BOOKS_DIR}/{book.id}/{filename}"
+                if i == 1:
+                    cover_rel = rel
+
+                w, h = None, None
+                try:
+                    from PIL import Image
+                    img = Image.open(dest)
+                    w, h = img.size
+                    img.close()
+                except Exception:
+                    pass
+
+                pages.append((i, rel, w, h))
+
+            db.add_book_pages(book.id, pages)
+
+            if cover_rel:
+                with db._lock:
+                    db._conn.execute(
+                        "UPDATE books SET cover_path = ? WHERE id = ?", (cover_rel, book.id)
+                    )
+
+            with import_lock:
+                import_state["book_id"] = book.id
+                import_state["running"] = False
+                import_state["progress"] = "完了"
+
+        except Exception as exc:
+            with import_lock:
+                import_state["error"] = f"{type(exc).__name__}: {exc}"
+                import_state["running"] = False
+        finally:
+            # Cleanup temp dir
+            if tmp_dir:
+                import shutil
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    @app.post("/api/books/import")
+    def api_import_book(body: _BookImportBody) -> JSONResponse:
+        if not body.url.strip():
+            raise HTTPException(status_code=400, detail="URL is required")
+        with import_lock:
+            if import_state["running"]:
+                return JSONResponse(
+                    {"started": False, "reason": "already running"}, status_code=409
+                )
+            import_state["running"] = True
+            import_state["error"] = None
+            import_state["book_id"] = None
+            import_state["title"] = ""
+            import_state["progress"] = "開始中..."
+        threading.Thread(
+            target=_import_worker, args=(body.url.strip(),), daemon=True
+        ).start()
+        return JSONResponse({"started": True})
+
+    @app.get("/api/books/import/status")
+    def api_import_status() -> JSONResponse:
+        with import_lock:
+            return JSONResponse(dict(import_state))
+
     return app
 
 
