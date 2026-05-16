@@ -390,6 +390,7 @@ function switchTab(tab) {
   state.offset = 0; state.posts = []; state.dividerInserted = false;
   setupSeenObserver();          // turn observer on for timeline, off otherwise
   if (tab === 'bookshelf') {
+    $('#masonry').innerHTML = '';
     fetchBooks();
   } else {
     fetchPosts();
