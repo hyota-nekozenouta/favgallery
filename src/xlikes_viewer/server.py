@@ -1132,72 +1132,54 @@ def create_app(
     # --- Site-specific scrapers ---
 
     def _scrape_doujin_freee(url: str, tmp_dir: Path) -> list[Path]:
-        """doujin-freee.cc 専用: div.single-img 内の img を全ページ取得"""
+        """doujin-freee.cc 専用: img_gage スライダーから全画像URLを生成して取得"""
         import requests as _requests
         from bs4 import BeautifulSoup
-        from urllib.parse import urljoin
 
         _headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
 
-        img_urls: list[str] = []
-        visited: set[str] = set()
-        current_url = url
+        resp = _requests.get(url, timeout=30, headers=_headers)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
 
-        for _ in range(100):
-            if current_url in visited:
-                break
-            visited.add(current_url)
+        # img_gage から画像生成パラメータを抽出
+        gage = soup.select_one(".img_gage, [class*=img_gage]")
+        if not gage:
+            return []
 
-            resp = _requests.get(current_url, timeout=30, headers=_headers)
-            resp.raise_for_status()
-            soup = BeautifulSoup(resp.text, "html.parser")
+        max_el = gage.select_one("input[type='range']")
+        img_b_el = gage.select_one("#img_b")
+        img_s_el = gage.select_one("#img_s")
+        year_el = gage.select_one("#post_year")
+        month_el = gage.select_one("#post_month")
 
-            # div.single-img 内の img のみ取得（漫画本体）
-            for img in soup.select("div.single-img img"):
-                src = img.get("data-src") or img.get("data-lazy-src") or img.get("src")
-                if src:
-                    if src.startswith("//"):
-                        src = "https:" + src
-                    elif not src.startswith("http"):
-                        src = urljoin(current_url, src)
-                    img_urls.append(src)
+        if not all([max_el, img_b_el, img_s_el, year_el, month_el]):
+            return []
 
-            # ページネーション: 投稿内ページ送り（/2/, /3/ ...）
-            # doujin-freee は .page-links 内に数字リンクがある
-            next_url = None
-            page_nav = soup.select(".page-links a, .post-page-numbers a, .pagination a")
-            for link in page_nav:
-                href = link.get("href")
-                if not href:
-                    continue
-                full = urljoin(current_url, href)
-                if full not in visited:
-                    next_url = full
-                    break
+        max_pages = int(max_el.get("max", "1"))
+        img_b = img_b_el.get("value", "")
+        img_s = img_s_el.get("value", "")
+        post_year = year_el.get("value", "")
+        post_month = month_el.get("value", "")
 
-            if not next_url:
-                break
-            current_url = next_url
+        # URL パターン: https://img.doujin-freee.cc/thumb640/{year}{month}/{img_b}{img_s}/{img_s}-{page:03d}-640.jpg
+        img_urls = [
+            f"https://img.doujin-freee.cc/thumb640/{post_year}{post_month}/{img_b}{img_s}/{img_s}-{i:03d}-640.jpg"
+            for i in range(1, max_pages + 1)
+        ]
 
-        # 重複除去・ダウンロード
-        seen: set[str] = set()
+        # ダウンロード
         files: list[Path] = []
         for i, img_url in enumerate(img_urls, 1):
-            if img_url in seen:
-                continue
-            seen.add(img_url)
             try:
                 r = _requests.get(img_url, timeout=30, headers={
                     **_headers, "Referer": url,
                 })
                 if r.status_code != 200:
                     continue
-                ext = Path(img_url.split("?")[0]).suffix.lower() or ".jpg"
-                if ext not in {".jpg", ".jpeg", ".png", ".webp", ".avif", ".bmp"}:
-                    ext = ".jpg"
-                dest = tmp_dir / f"{i:04d}{ext}"
+                dest = tmp_dir / f"{i:04d}.jpg"
                 dest.write_bytes(r.content)
                 files.append(dest)
             except Exception:
