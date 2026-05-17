@@ -94,6 +94,12 @@
     .tab-btn:not(.active) { color: #a1a1aa; }
     .tab-btn:not(.active):hover { background: #1c1c22; color: #e6e6ea; }
     .tab-btn.active { background: #4f46e5; color: white; }
+    .tab-icon { display: none; }
+    @media (max-width: 767px) {
+      .tab-btn { padding: 6px 10px; font-size: 16px; }
+      .tab-label { display: none; }
+      .tab-icon { display: inline; }
+    }
     .popover {
       position: fixed; min-width: 220px; max-width: 280px;
       background: #14141a; border: 1px solid #2a2a30; border-radius: 8px;
@@ -232,9 +238,9 @@
           class="items-center justify-center w-8 h-8 text-zinc-400 hover:text-white hover:bg-zinc-700 rounded transition-colors text-xl leading-none"
           title="メニュー">☰</button>
         <div class="flex items-center gap-1 bg-zinc-900 rounded-md p-1">
-          <button id="tabLikes" class="tab-btn active">いいね</button>
-          <button id="tabTimeline" class="tab-btn">フォロー中</button>
-          <button id="tabBookshelf" class="tab-btn">本棚</button>
+          <button id="tabLikes" class="tab-btn active"><span class="tab-icon">♥</span><span class="tab-label">いいね</span></button>
+          <button id="tabTimeline" class="tab-btn"><span class="tab-icon">👁</span><span class="tab-label">フォロー中</span></button>
+          <button id="tabBookshelf" class="tab-btn"><span class="tab-icon">📚</span><span class="tab-label">本棚</span></button>
         </div>
         <button id="layoutToggle" title="レイアウト切替"
           class="p-1.5 rounded text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors text-lg leading-none">▦</button>
@@ -1767,6 +1773,7 @@ function renderBooks() {
     const cover = b.cover_path ? `/thumb/${b.cover_path}?size=400` : '';
     return `<div class="tile cursor-pointer" data-book-id="${b.id}">
       ${cover ? `<img src="${cover}" loading="lazy" alt="" />` : '<div class="bg-zinc-800 w-full" style="min-height:200px"></div>'}
+      <button class="del-btn" data-del-book="${b.id}" title="削除">🗑</button>
       <div class="info" style="opacity:1;position:relative;padding:8px 10px;background:rgba(0,0,0,.7)">
         <div class="truncate font-medium">${escapeHtml(b.title)}</div>
         <div class="text-zinc-400 text-xs">${b.page_count} ページ</div>
@@ -1777,6 +1784,16 @@ function renderBooks() {
 
   // Add button click
   document.getElementById('bookAddTile')?.addEventListener('click', openBookUpload);
+
+  // Delete buttons
+  m.querySelectorAll('[data-del-book]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('この漫画を削除しますか？')) return;
+      await fetch(`/api/books/${btn.dataset.delBook}`, { method: 'DELETE' });
+      await fetchBooks();
+    });
+  });
 
   // Book tile clicks
   m.querySelectorAll('.tile[data-book-id]').forEach(el => {
@@ -1805,15 +1822,19 @@ function openBookUpload() {
       </div>
       <div id="panelUrl" class="hidden">
         <label class="block text-sm text-zinc-400 mb-1">URL</label>
-        <input id="bookUrl" type="url" class="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 mb-2 text-white" placeholder="https://hitomi.la/..." />
-        <p class="text-xs text-zinc-500 mb-4">対応サイトのURLを入力すると画像を自動取得します。</p>
+        <div class="flex gap-2 mb-2">
+          <input id="bookUrl" type="url" class="flex-1 bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-white text-sm" placeholder="https://hitomi.la/..." />
+          <button id="bookAddUrlBtn" class="px-3 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-sm text-white whitespace-nowrap">追加</button>
+        </div>
+        <p class="text-xs text-zinc-500 mb-3">URLを入力して「追加」→ キューに積まれます。複数OK。</p>
+        <div id="importQueueList" class="space-y-1 max-h-48 overflow-y-auto mb-3"></div>
       </div>
       <div id="bookUploadProgress" class="hidden mb-4">
         <div class="w-full bg-zinc-700 rounded-full h-2"><div id="bookProgressBar" class="bg-indigo-500 h-2 rounded-full transition-all" style="width:0%"></div></div>
         <p class="text-xs text-zinc-400 mt-1" id="bookProgressText">処理中...</p>
       </div>
       <div class="flex gap-3 justify-end">
-        <button id="bookCancelBtn" class="px-4 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-sm">キャンセル</button>
+        <button id="bookCancelBtn" class="px-4 py-2 rounded bg-zinc-700 hover:bg-zinc-600 text-sm">閉じる</button>
         <button id="bookSubmitBtn" class="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 text-sm font-medium">追加</button>
       </div>
     </div>`;
@@ -1837,15 +1858,25 @@ function openBookUpload() {
   });
 
   modal.querySelector('#bookCancelBtn').addEventListener('click', () => {
-    if (modal.dataset.importing === 'true') return; // DL中は閉じない
     modal.remove();
+    if (state._importPoll) { clearInterval(state._importPoll); state._importPoll = null; }
+    fetchBooks();
   });
   modal.addEventListener('click', (e) => {
-    if (e.target === modal && modal.dataset.importing !== 'true') modal.remove();
+    if (e.target === modal) {
+      modal.remove();
+      if (state._importPoll) { clearInterval(state._importPoll); state._importPoll = null; }
+      fetchBooks();
+    }
   });
   modal.querySelector('#bookSubmitBtn').addEventListener('click', () => {
     if (mode === 'file') submitBook();
-    else submitBookUrl();
+  });
+  // URL mode: "追加" button adds to queue
+  modal.querySelector('#bookAddUrlBtn')?.addEventListener('click', () => addUrlToQueue());
+  // Enter key in URL input
+  modal.querySelector('#bookUrl')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); addUrlToQueue(); }
   });
 }
 
@@ -1872,16 +1903,11 @@ async function submitBook() {
   }
 }
 
-async function submitBookUrl() {
-  const url = document.getElementById('bookUrl').value.trim();
-  if (!url) { alert('URLを入力してください'); return; }
-
-  const modal = document.getElementById('bookUploadModal');
-  if (modal) modal.dataset.importing = 'true';
-  document.getElementById('bookUploadProgress').classList.remove('hidden');
-  document.getElementById('bookSubmitBtn').disabled = true;
-  document.getElementById('bookCancelBtn').classList.add('hidden');
-  document.getElementById('bookProgressText').textContent = '取得開始...';
+async function addUrlToQueue() {
+  const input = document.getElementById('bookUrl');
+  const url = input.value.trim();
+  if (!url) return;
+  input.value = '';
 
   try {
     const r = await fetch('/api/books/import', {
@@ -1891,43 +1917,59 @@ async function submitBookUrl() {
     });
     if (!r.ok) {
       const e = await r.json().catch(() => ({}));
-      alert(String(e.detail || e.reason || JSON.stringify(e) || 'エラー'));
-      if (modal) modal.dataset.importing = '';
-      document.getElementById('bookCancelBtn')?.classList.remove('hidden');
-      document.getElementById('bookUploadProgress')?.classList.add('hidden');
-      document.getElementById('bookSubmitBtn').disabled = false;
+      alert(String(e.detail || e.reason || 'エラー'));
       return;
     }
-
-    // Poll for status (works even if modal is closed)
-    const poll = setInterval(async () => {
-      const sr = await fetch('/api/books/import/status');
-      const st = await sr.json();
-      const progEl = document.getElementById('bookProgressText');
-      if (progEl) {
-        progEl.textContent = st.progress || '処理中...';
-        if (st.title) progEl.textContent += ` — ${st.title}`;
-      }
-
-      if (!st.running) {
-        clearInterval(poll);
-        if (st.error) {
-          alert('取得失敗: ' + String(st.error));
-          document.getElementById('bookUploadModal')?.remove();
-        } else if (st.book_id) {
-          document.getElementById('bookUploadModal')?.remove();
-          await fetchBooks();
-        }
-      }
-    }, 1500);
   } catch (e) {
     alert('リクエスト失敗: ' + e.message);
-    if (modal) modal.dataset.importing = '';
-    document.getElementById('bookCancelBtn')?.classList.remove('hidden');
-    document.getElementById('bookUploadProgress')?.classList.add('hidden');
-    document.getElementById('bookSubmitBtn').disabled = false;
+    return;
+  }
+
+  // Start polling if not already
+  if (!state._importPoll) {
+    state._importPoll = setInterval(pollImportQueue, 1500);
+    pollImportQueue();
   }
 }
+
+async function pollImportQueue() {
+  try {
+    const r = await fetch('/api/books/import/status');
+    const data = await r.json();
+    const queue = data.queue || [];
+    renderImportQueue(queue);
+
+    // If all done/error, stop polling
+    const active = queue.some(i => i.status === 'running' || i.status === 'pending');
+    if (!active && queue.length > 0) {
+      clearInterval(state._importPoll);
+      state._importPoll = null;
+    }
+  } catch { /* ignore network blip */ }
+}
+
+function renderImportQueue(queue) {
+  const el = document.getElementById('importQueueList');
+  if (!el) return;
+  if (!queue.length) { el.innerHTML = ''; return; }
+
+  el.innerHTML = queue.map(item => {
+    const shortUrl = item.url.length > 40 ? item.url.slice(0, 37) + '...' : item.url;
+    let badge = '';
+    if (item.status === 'running') badge = '<span class="text-indigo-400">⏳ ' + escapeHtml(item.progress || 'DL中') + '</span>';
+    else if (item.status === 'done') badge = '<span class="text-green-400">✓ 完了</span>';
+    else if (item.status === 'error') badge = '<span class="text-red-400">✗ ' + escapeHtml((item.error || '').slice(0, 30)) + '</span>';
+    else badge = '<span class="text-zinc-500">待機中</span>';
+
+    const titlePart = item.title ? ` <span class="text-zinc-300">${escapeHtml(item.title)}</span>` : '';
+    return `<div class="flex items-center justify-between text-xs py-1 px-2 bg-zinc-800 rounded">
+      <div class="truncate flex-1 text-zinc-400" title="${escapeHtml(item.url)}">${escapeHtml(shortUrl)}${titlePart}</div>
+      <div class="ml-2 whitespace-nowrap">${badge}</div>
+    </div>`;
+  }).join('');
+}
+
+state._importPoll = null;
 
 // --- Book Reader ---
 state.reader = { bookId: null, pages: [], pos: 0 };

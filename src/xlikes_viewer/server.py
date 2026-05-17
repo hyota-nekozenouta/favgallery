@@ -1083,27 +1083,34 @@ def create_app(
 
     # --- Book Import (URL → gallery-dl → bookshelf) -----------------------
 
-    import_state: dict[str, object] = {
-        "running": False,
-        "error": None,
-        "book_id": None,
-        "title": "",
-        "progress": "",
-    }
-    import_lock = threading.Lock()
+    import_queue: list[dict] = []  # [{id, url, status, error, book_id, title, progress}]
+    import_queue_lock = threading.Lock()
+    _import_id_counter = [0]
 
-    def _import_worker(url: str) -> None:
+    def _process_next_in_queue() -> None:
+        """Start the next pending item in the queue, if any."""
+        with import_queue_lock:
+            pending = [item for item in import_queue if item["status"] == "pending"]
+            if not pending:
+                return
+            item = pending[0]
+            item["status"] = "running"
+            item["progress"] = "開始中..."
+        threading.Thread(
+            target=_import_worker, args=(item,), daemon=True
+        ).start()
+
+    def _import_worker(item: dict) -> None:
         import re
         import subprocess
         import tempfile
 
+        url = item["url"]
         tmp_dir = None
-        cfg_path = None
         try:
             tmp_dir = tempfile.mkdtemp(prefix="book_import_")
             tmp_path = Path(tmp_dir)
 
-            # Write a temporary gallery-dl config for flat output
             cfg = {
                 "extractor": {
                     "base-directory": tmp_dir.replace("\\", "/") + "/",
@@ -1115,25 +1122,18 @@ def create_app(
             cfg_path = Path(tmp_dir) / "gdl_config.json"
             cfg_path.write_text(_json.dumps(cfg), encoding="utf-8")
 
-            cmd = [
-                "gallery-dl",
-                "--config", str(cfg_path),
-                url,
-            ]
-            with import_lock:
-                import_state["progress"] = "ダウンロード中..."
+            cmd = ["gallery-dl", "--config", str(cfg_path), url]
+            with import_queue_lock:
+                item["progress"] = "ダウンロード中..."
 
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=300
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
             if result.returncode != 0:
-                with import_lock:
-                    import_state["error"] = f"gallery-dl failed: {result.stderr[:500]}"
-                    import_state["running"] = False
+                with import_queue_lock:
+                    item["error"] = f"gallery-dl failed: {result.stderr[:500]}"
+                    item["status"] = "error"
                 return
 
-            # Find downloaded image files
             image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".bmp"}
             all_files: list[Path] = []
             for f in sorted(tmp_path.rglob("*")):
@@ -1141,18 +1141,16 @@ def create_app(
                     all_files.append(f)
 
             if not all_files:
-                with import_lock:
-                    import_state["error"] = "画像が見つか���ませんでした"
-                    import_state["running"] = False
+                with import_queue_lock:
+                    item["error"] = "画像が見つかりませんでした"
+                    item["status"] = "error"
                 return
 
-            # Extract title from URL or metadata
-            # Try to get gallery title from gallery-dl metadata json
+            # Extract title
             title = "Imported"
             for f in tmp_path.rglob("*.json"):
                 try:
-                    import json as _j
-                    meta = _j.loads(f.read_text(encoding="utf-8"))
+                    meta = _json.loads(f.read_text(encoding="utf-8"))
                     if isinstance(meta, dict):
                         title = meta.get("gallery", {}).get("title", "") or meta.get("title", "") or title
                         if title != "Imported":
@@ -1160,24 +1158,20 @@ def create_app(
                 except Exception:
                     pass
 
-            # Fallback: extract from URL
             if title == "Imported":
                 from urllib.parse import unquote
                 parts = unquote(url).rsplit("/", 1)[-1].rsplit(".", 1)[0]
-                # Remove trailing ID number
                 title = re.sub(r'-\d+$', '', parts).replace('-', ' ').strip() or "Imported"
 
-            with import_lock:
-                import_state["title"] = title
-                import_state["progress"] = "本棚に登録中..."
+            with import_queue_lock:
+                item["title"] = title
+                item["progress"] = "本棚に登録中..."
 
-            # Natural sort helper
             def _natural_key(name: str) -> list:
                 return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', name)]
 
             all_files.sort(key=lambda f: _natural_key(f.name))
 
-            # Create book record
             book = db.create_book(title=title, cover_path=None, page_count=len(all_files))
             book_dir = library_root / _BOOKS_DIR / str(book.id)
             book_dir.mkdir(parents=True, exist_ok=True)
@@ -1215,58 +1209,60 @@ def create_app(
                         "UPDATE books SET cover_path = ? WHERE id = ?", (cover_rel, book.id)
                     )
 
-            # Upload to R2 if configured, then delete local copies
+            # Upload to R2 if configured
             if r2_client is not None:
-                for page_num, rel, _w, _h in pages:
+                for _page_num, rel, _w, _h in pages:
                     local_path = library_root / rel
                     if local_path.is_file():
                         try:
                             r2_client.upload_file(local_path, rel)
                             local_path.unlink()
                         except Exception:
-                            pass  # Keep local if R2 fails
-                # Remove empty directory
+                            pass
                 if book_dir.exists() and not any(book_dir.iterdir()):
                     book_dir.rmdir()
 
-            with import_lock:
-                import_state["book_id"] = book.id
-                import_state["running"] = False
-                import_state["progress"] = "完了"
+            with import_queue_lock:
+                item["book_id"] = book.id
+                item["status"] = "done"
+                item["progress"] = "完了"
 
         except Exception as exc:
-            with import_lock:
-                import_state["error"] = f"{type(exc).__name__}: {exc}"
-                import_state["running"] = False
+            with import_queue_lock:
+                item["error"] = f"{type(exc).__name__}: {exc}"
+                item["status"] = "error"
         finally:
-            # Cleanup temp dir
             if tmp_dir:
                 import shutil
                 shutil.rmtree(tmp_dir, ignore_errors=True)
+            _process_next_in_queue()
 
     @app.post("/api/books/import")
     def api_import_book(body: _BookImportBody) -> JSONResponse:
         if not body.url.strip():
             raise HTTPException(status_code=400, detail="URL is required")
-        with import_lock:
-            if import_state["running"]:
-                return JSONResponse(
-                    {"started": False, "reason": "already running"}, status_code=409
-                )
-            import_state["running"] = True
-            import_state["error"] = None
-            import_state["book_id"] = None
-            import_state["title"] = ""
-            import_state["progress"] = "開始中..."
-        threading.Thread(
-            target=_import_worker, args=(body.url.strip(),), daemon=True
-        ).start()
-        return JSONResponse({"started": True})
+        with import_queue_lock:
+            _import_id_counter[0] += 1
+            item = {
+                "id": _import_id_counter[0],
+                "url": body.url.strip(),
+                "status": "pending",
+                "error": None,
+                "book_id": None,
+                "title": "",
+                "progress": "待機中...",
+            }
+            import_queue.append(item)
+            # Start processing if nothing is currently running
+            running = any(i["status"] == "running" for i in import_queue)
+        if not running:
+            _process_next_in_queue()
+        return JSONResponse({"started": True, "id": item["id"]})
 
     @app.get("/api/books/import/status")
     def api_import_status() -> JSONResponse:
-        with import_lock:
-            return JSONResponse(dict(import_state))
+        with import_queue_lock:
+            return JSONResponse({"queue": list(import_queue)})
 
     return app
 
