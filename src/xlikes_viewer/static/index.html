@@ -1836,8 +1836,13 @@ function openBookUpload() {
     modal.querySelector('#panelFile').classList.add('hidden');
   });
 
-  modal.querySelector('#bookCancelBtn').addEventListener('click', () => modal.remove());
-  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+  modal.querySelector('#bookCancelBtn').addEventListener('click', () => {
+    if (modal.dataset.importing === 'true') return; // DL中は閉じない
+    modal.remove();
+  });
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal && modal.dataset.importing !== 'true') modal.remove();
+  });
   modal.querySelector('#bookSubmitBtn').addEventListener('click', () => {
     if (mode === 'file') submitBook();
     else submitBookUrl();
@@ -1871,8 +1876,11 @@ async function submitBookUrl() {
   const url = document.getElementById('bookUrl').value.trim();
   if (!url) { alert('URLを入力してください'); return; }
 
+  const modal = document.getElementById('bookUploadModal');
+  if (modal) modal.dataset.importing = 'true';
   document.getElementById('bookUploadProgress').classList.remove('hidden');
   document.getElementById('bookSubmitBtn').disabled = true;
+  document.getElementById('bookCancelBtn').classList.add('hidden');
   document.getElementById('bookProgressText').textContent = '取得開始...';
 
   try {
@@ -1881,22 +1889,32 @@ async function submitBookUrl() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
     });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); alert(String(e.detail || e.reason || JSON.stringify(e) || 'エラー')); return; }
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      alert(String(e.detail || e.reason || JSON.stringify(e) || 'エラー'));
+      if (modal) modal.dataset.importing = '';
+      document.getElementById('bookCancelBtn')?.classList.remove('hidden');
+      document.getElementById('bookUploadProgress')?.classList.add('hidden');
+      document.getElementById('bookSubmitBtn').disabled = false;
+      return;
+    }
 
-    // Poll for status
+    // Poll for status (works even if modal is closed)
     const poll = setInterval(async () => {
       const sr = await fetch('/api/books/import/status');
       const st = await sr.json();
-      document.getElementById('bookProgressText').textContent = st.progress || '処理中...';
-      if (st.title) document.getElementById('bookProgressText').textContent += ` — ${st.title}`;
+      const progEl = document.getElementById('bookProgressText');
+      if (progEl) {
+        progEl.textContent = st.progress || '処理中...';
+        if (st.title) progEl.textContent += ` — ${st.title}`;
+      }
 
       if (!st.running) {
         clearInterval(poll);
         if (st.error) {
           alert('取得失敗: ' + String(st.error));
-          document.getElementById('bookUploadProgress').classList.add('hidden');
-          document.getElementById('bookSubmitBtn').disabled = false;
-        } else {
+          document.getElementById('bookUploadModal')?.remove();
+        } else if (st.book_id) {
           document.getElementById('bookUploadModal')?.remove();
           await fetchBooks();
         }
@@ -1904,7 +1922,9 @@ async function submitBookUrl() {
     }, 1500);
   } catch (e) {
     alert('リクエスト失敗: ' + e.message);
-    document.getElementById('bookUploadProgress').classList.add('hidden');
+    if (modal) modal.dataset.importing = '';
+    document.getElementById('bookCancelBtn')?.classList.remove('hidden');
+    document.getElementById('bookUploadProgress')?.classList.add('hidden');
     document.getElementById('bookSubmitBtn').disabled = false;
   }
 }
