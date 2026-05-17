@@ -9,4 +9,4 @@ cmds = [
 ]
 
 [start]
-cmd = "rm -f /data/library/archive.sqlite && rm -rf /data/library/*/ && PYTHONPATH=/app/src uvicorn xlikes_viewer.server:app --host 0.0.0.0 --port $PORT"
+cmd = "rm -f /data/library/archive.sqlite && PYTHONPATH=/app/src uvicorn xlikes_viewer.server:app --host 0.0.0.0 --port $PORT"
