@@ -330,13 +330,21 @@ def create_app(
         return idx
 
     def _initial_scan() -> None:
-        # If DB has posts, build from DB (fast). Also ingest local files
-        # in case there are new ones from a sync that ran before restart.
-        ingest_to_db(library_root, db)
-        idx = build_index_from_db(db, library_root)
-        with state_lock:
-            state["index"] = idx
-            state["scanning"] = False
+        # If DB has posts, build from DB (fast). Ingest local JSON
+        # sidecars only if DB is empty (first run or after wipe).
+        try:
+            existing = db.posts_count()
+            if existing == 0:
+                ingest_to_db(library_root, db)
+            idx = build_index_from_db(db, library_root)
+            with state_lock:
+                state["index"] = idx
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+        finally:
+            with state_lock:
+                state["scanning"] = False
 
     if scan_in_background:
         threading.Thread(target=_initial_scan, daemon=True).start()
