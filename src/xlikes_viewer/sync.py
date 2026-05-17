@@ -207,6 +207,46 @@ class SyncRunner:
                 errors += 1
         return {"deleted": deleted, "checked": checked, "errors": errors}
 
+    def _stream_upload_loop(self, stop: threading.Event) -> None:
+        """Continuously upload new media files to R2 and delete local copies.
+
+        Runs in a parallel thread during gallery-dl download so that disk
+        usage stays bounded. Checks every 5 seconds for new media files.
+        """
+        import time as _time
+
+        if self._r2_client is None or self._library_root is None:
+            return
+        library = self._library_root
+
+        while not stop.is_set():
+            stop.wait(5)  # check every 5 seconds
+            if stop.is_set():
+                break
+            try:
+                uploaded = 0
+                for media_path in library.rglob("*"):
+                    if stop.is_set():
+                        break
+                    if not media_path.is_file():
+                        continue
+                    if media_path.suffix.lower() not in _MEDIA_EXTENSIONS:
+                        continue
+                    rel = media_path.relative_to(library)
+                    if "thumbs" in rel.parts[:-1]:
+                        continue
+                    key = rel.as_posix()
+                    try:
+                        self._r2_client.upload_file(media_path, key)
+                        media_path.unlink()
+                        uploaded += 1
+                    except Exception:
+                        pass  # will retry next loop
+                if uploaded:
+                    self.state.log_lines.append(f"[r2-stream] {uploaded} files uploaded & deleted")
+            except Exception:
+                pass  # non-fatal, retry next iteration
+
     def _worker(self) -> None:
         from gallery_dl import job as gdl_job  # type: ignore[import-untyped]
 
@@ -219,6 +259,15 @@ class SyncRunner:
 
         rc = 0
         err: str | None = None
+        # Start parallel R2 upload thread to prevent disk from filling up.
+        upload_stop = threading.Event()
+        upload_thread: threading.Thread | None = None
+        if self._r2_client is not None and self._library_root is not None:
+            upload_thread = threading.Thread(
+                target=self._stream_upload_loop, args=(upload_stop,), daemon=True
+            )
+            upload_thread.start()
+
         try:
             username = (self._db.get_setting(_MY_USERNAME_KEY) or "").strip()
             if not username:
@@ -237,7 +286,11 @@ class SyncRunner:
                 prepare_config(self.config_path, archive=..., twitter_retweets=False)
                 gdl_job.DownloadJob(url).run()
 
-            self.state.log_lines.append("[sync] complete")
+            self.state.log_lines.append("[sync] download complete")
+            # Stop streaming upload and do one final sweep to catch stragglers.
+            upload_stop.set()
+            if upload_thread is not None:
+                upload_thread.join(timeout=10)
             if self._r2_client is not None and self._library_root is not None:
                 self._upload_library_to_r2()
             if self._on_complete is not None:
@@ -249,6 +302,9 @@ class SyncRunner:
             err = f"{type(exc).__name__}: {exc}"
             rc = -1
         finally:
+            upload_stop.set()
+            if upload_thread is not None:
+                upload_thread.join(timeout=5)
             gdl_logger.removeHandler(handler)
             with self._lock:
                 self.state.running = False
