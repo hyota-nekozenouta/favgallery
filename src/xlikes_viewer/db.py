@@ -75,6 +75,28 @@ CREATE TABLE IF NOT EXISTS my_likes (
     fetched_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS posts (
+    tweet_id TEXT NOT NULL,
+    num INTEGER NOT NULL,
+    rel_media TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    extension TEXT NOT NULL,
+    width INTEGER,
+    height INTEGER,
+    date TEXT,
+    author_name TEXT NOT NULL,
+    author_nick TEXT,
+    content TEXT,
+    favorite_count INTEGER DEFAULT 0,
+    view_count INTEGER DEFAULT 0,
+    sensitive INTEGER DEFAULT 0,
+    lang TEXT,
+    hashtags_json TEXT,
+    PRIMARY KEY (tweet_id, num)
+);
+CREATE INDEX IF NOT EXISTS posts_date ON posts(date DESC);
+CREATE INDEX IF NOT EXISTS posts_author ON posts(author_name);
+
 CREATE TABLE IF NOT EXISTS books (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
@@ -530,6 +552,74 @@ class Database:
             for r in rows
         ]
         return int(total), posts
+
+    # --- Posts (likes index) ------------------------------------------------
+
+    def upsert_post(
+        self,
+        *,
+        tweet_id: str,
+        num: int,
+        rel_media: str,
+        media_type: str,
+        extension: str,
+        width: int | None,
+        height: int | None,
+        date: str,
+        author_name: str,
+        author_nick: str,
+        content: str,
+        favorite_count: int,
+        view_count: int,
+        sensitive: bool,
+        lang: str,
+        hashtags: tuple[str, ...] | list[str],
+    ) -> None:
+        sql = """
+            INSERT INTO posts
+              (tweet_id, num, rel_media, media_type, extension, width, height,
+               date, author_name, author_nick, content,
+               favorite_count, view_count, sensitive, lang, hashtags_json)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(tweet_id, num) DO UPDATE SET
+                rel_media=excluded.rel_media,
+                media_type=excluded.media_type,
+                extension=excluded.extension,
+                width=excluded.width,
+                height=excluded.height,
+                date=excluded.date,
+                author_name=excluded.author_name,
+                author_nick=excluded.author_nick,
+                content=excluded.content,
+                favorite_count=excluded.favorite_count,
+                view_count=excluded.view_count,
+                sensitive=excluded.sensitive,
+                lang=excluded.lang,
+                hashtags_json=excluded.hashtags_json
+        """
+        with self._lock:
+            self._conn.execute(sql, (
+                tweet_id, num, rel_media, media_type, extension,
+                width, height, date, author_name, author_nick, content,
+                favorite_count, view_count, int(sensitive), lang,
+                json.dumps(list(hashtags), ensure_ascii=False),
+            ))
+
+    def all_posts(self) -> list[tuple]:
+        """Return all posts as raw tuples for Index construction."""
+        sql = """
+            SELECT tweet_id, num, rel_media, media_type, extension,
+                   width, height, date, author_name, author_nick, content,
+                   favorite_count, view_count, sensitive, lang, hashtags_json
+            FROM posts ORDER BY date DESC
+        """
+        with self._lock:
+            return self._conn.execute(sql).fetchall()
+
+    def posts_count(self) -> int:
+        with self._lock:
+            (n,) = self._conn.execute("SELECT COUNT(*) FROM posts").fetchone()
+        return int(n)
 
     # --- Books (bookshelf) ------------------------------------------------
 

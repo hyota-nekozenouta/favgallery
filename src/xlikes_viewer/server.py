@@ -24,7 +24,7 @@ from xlikes_viewer.like import like_tweet
 from xlikes_viewer.proxy import CdnProxy, is_allowed
 from xlikes_viewer.r2 import R2Client, r2_config_from_env
 from xlikes_viewer.save_one import save_tweet
-from xlikes_viewer.scanner import DEFAULT_LIBRARY, Index, Post, scan_library
+from xlikes_viewer.scanner import DEFAULT_LIBRARY, Index, Post, build_index_from_db, ingest_to_db, scan_library
 from xlikes_viewer.sync import SyncRunner
 from xlikes_viewer.thumbs import thumbnail_bytes, thumbnail_bytes_from_raw
 from xlikes_viewer.timeline import (
@@ -280,26 +280,14 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="Archive", version="0.2.0")
     app.middleware("http")(_make_basic_auth_middleware())
-    # Heavy `scan_library` walk goes on a background thread by default so the
-    # window can paint immediately; the frontend polls `scanning=True` via
-    # /api/library until done. Tests pass `scan_in_background=False` to keep
-    # behavior deterministic.
+    # Index is built from DB (persistent). On first run or after sync,
+    # local JSON sidecars are ingested into the DB. The frontend polls
+    # `scanning=True` via /api/library until the initial load completes.
     state: dict[str, object] = {
         "index": Index(library_root=library_root),
         "scanning": scan_in_background,
     }
     state_lock = threading.Lock()
-
-    def _initial_scan() -> None:
-        idx = scan_library(library_root)
-        with state_lock:
-            state["index"] = idx
-            state["scanning"] = False
-
-    if scan_in_background:
-        threading.Thread(target=_initial_scan, daemon=True).start()
-    else:
-        _initial_scan()
 
     app.state.library_root = library_root
 
@@ -334,10 +322,26 @@ def create_app(
             return state["index"]  # type: ignore[return-value]
 
     def _refresh_index() -> Index:
-        idx = scan_library(library_root)
+        # Ingest any new local JSON sidecars into DB, then rebuild from DB.
+        ingest_to_db(library_root, db)
+        idx = build_index_from_db(db, library_root)
         with state_lock:
             state["index"] = idx
         return idx
+
+    def _initial_scan() -> None:
+        # If DB has posts, build from DB (fast). Also ingest local files
+        # in case there are new ones from a sync that ran before restart.
+        ingest_to_db(library_root, db)
+        idx = build_index_from_db(db, library_root)
+        with state_lock:
+            state["index"] = idx
+            state["scanning"] = False
+
+    if scan_in_background:
+        threading.Thread(target=_initial_scan, daemon=True).start()
+    else:
+        _initial_scan()
 
     @app.get("/", response_class=HTMLResponse)
     def root() -> HTMLResponse:

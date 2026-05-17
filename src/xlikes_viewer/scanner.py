@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from xlikes_viewer.x_helpers import extract_hashtags
+
+if TYPE_CHECKING:
+    from xlikes_viewer.db import Database
 
 
 def _resolve_default_library() -> Path:
@@ -145,6 +150,92 @@ def scan_library(root: Path = DEFAULT_LIBRARY) -> Index:
     # Sort newest-first (date string is sortable).
     index.posts.sort(key=lambda p: p.date, reverse=True)
 
+    author_counts: dict[str, int] = {}
+    author_nicks: dict[str, str] = {}
+    tag_counts: dict[str, int] = {}
+    for p in index.posts:
+        author_counts[p.author_name] = author_counts.get(p.author_name, 0) + 1
+        if p.author_nick and p.author_name not in author_nicks:
+            author_nicks[p.author_name] = p.author_nick
+        for t in p.hashtags:
+            tag_counts[t] = tag_counts.get(t, 0) + 1
+
+    index.authors = {
+        name: AuthorSummary(
+            name=name,
+            nick=author_nicks.get(name, ""),
+            post_count=count,
+        )
+        for name, count in sorted(author_counts.items(), key=lambda kv: -kv[1])
+    }
+    index.tags = dict(sorted(tag_counts.items(), key=lambda kv: -kv[1]))
+    return index
+
+
+def ingest_to_db(root: Path, db: "Database") -> int:
+    """Walk local JSON sidecars and upsert all posts into the DB. Returns count."""
+    if not root.exists():
+        return 0
+    count = 0
+    for json_path in root.rglob("*.json"):
+        post = _parse_json(json_path)
+        if post is None:
+            continue
+        db.upsert_post(
+            tweet_id=post.tweet_id,
+            num=post.num,
+            rel_media=post.rel_media,
+            media_type=post.media_type,
+            extension=post.extension,
+            width=post.width,
+            height=post.height,
+            date=post.date,
+            author_name=post.author_name,
+            author_nick=post.author_nick,
+            content=post.content,
+            favorite_count=post.favorite_count,
+            view_count=post.view_count,
+            sensitive=post.sensitive,
+            lang=post.lang,
+            hashtags=post.hashtags,
+        )
+        count += 1
+    return count
+
+
+def build_index_from_db(db: "Database", library_root: Path) -> Index:
+    """Build an Index from the DB posts table instead of filesystem scan."""
+    index = Index(library_root=library_root)
+    rows = db.all_posts()
+    for r in rows:
+        tweet_id, num, rel_media, media_type, extension, width, height, \
+            date, author_name, author_nick, content, \
+            favorite_count, view_count, sensitive, lang, hashtags_json = r
+        hashtags = tuple(json.loads(hashtags_json or "[]"))
+        media_path = library_root / rel_media.replace("/", os.sep)
+        post = Post(
+            tweet_id=str(tweet_id),
+            num=int(num),
+            media_path=media_path,
+            json_path=media_path,  # not used when serving from R2
+            media_type=media_type or "photo",
+            extension=(extension or "").lower(),
+            width=width,
+            height=height,
+            date=date or "",
+            author_name=author_name or "unknown",
+            author_nick=author_nick or "",
+            content=content or "",
+            favorite_count=int(favorite_count or 0),
+            view_count=int(view_count or 0),
+            sensitive=bool(sensitive),
+            lang=lang or "",
+            hashtags=hashtags,
+            rel_media=rel_media,
+        )
+        index.posts.append(post)
+
+    # posts already sorted by date DESC from SQL
     author_counts: dict[str, int] = {}
     author_nicks: dict[str, str] = {}
     tag_counts: dict[str, int] = {}
