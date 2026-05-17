@@ -1130,33 +1130,72 @@ def create_app(
         ).start()
 
     def _scrape_images_from_html(url: str, tmp_dir: Path) -> list[Path]:
-        """gallery-dl 非対応サイト向け: HTML から画像 URL を抽出してダウンロード"""
+        """gallery-dl 非対応サイト向け: HTML から全ページの画像を取得"""
         import requests as _requests
         from bs4 import BeautifulSoup
+        from urllib.parse import urlparse, urljoin
 
-        resp = _requests.get(url, timeout=30, headers={
+        _headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        })
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
+        }
 
-        # div.single-img 内の img を優先
-        containers = soup.select("div.single-img img")
-        if not containers:
-            # fallback: 記事本文内の大きな画像を全取得
-            containers = soup.select("article img, .entry-content img, .post-content img")
+        def _extract_imgs(soup):
+            """ページ内の漫画画像 URL を抽出"""
+            containers = soup.select("div.single-img img")
+            if not containers:
+                containers = soup.select("article img, .entry-content img, .post-content img")
+            urls = []
+            for img in containers:
+                src = img.get("data-src") or img.get("data-lazy-src") or img.get("src")
+                if src and not src.split("?")[0].endswith((".svg", ".gif")):
+                    if src.startswith("//"):
+                        src = "https:" + src
+                    elif src.startswith("/"):
+                        parsed = urlparse(url)
+                        src = f"{parsed.scheme}://{parsed.netloc}{src}"
+                    urls.append(src)
+            return urls
 
+        def _find_next_page(soup, current_url):
+            """次のページ URL を探す (WordPress ページネーション)"""
+            # パターン1: rel="next" リンク
+            link = soup.find("a", rel="next")
+            if link and link.get("href"):
+                return urljoin(current_url, link["href"])
+            # パターン2: "next" クラスのリンク
+            link = soup.select_one("a.next, .nav-next a, .pagination .next a, a.nextpostslink")
+            if link and link.get("href"):
+                return urljoin(current_url, link["href"])
+            # パターン3: ページ番号リンク（現在のページ+1）
+            current = soup.select_one(".current, .page-numbers.current, span.current")
+            if current:
+                next_sib = current.find_next_sibling("a")
+                if next_sib and next_sib.get("href"):
+                    return urljoin(current_url, next_sib["href"])
+            return None
+
+        # 全ページを巡回して画像 URL を収集
         img_urls: list[str] = []
-        for img in containers:
-            src = img.get("data-src") or img.get("data-lazy-src") or img.get("src")
-            if src and not src.split("?")[0].endswith((".svg", ".gif")):
-                if src.startswith("//"):
-                    src = "https:" + src
-                elif src.startswith("/"):
-                    from urllib.parse import urlparse
-                    parsed = urlparse(url)
-                    src = f"{parsed.scheme}://{parsed.netloc}{src}"
-                img_urls.append(src)
+        visited: set[str] = set()
+        current_url = url
+        max_pages = 100  # 安全制限
+
+        for _ in range(max_pages):
+            if current_url in visited:
+                break
+            visited.add(current_url)
+
+            resp = _requests.get(current_url, timeout=30, headers=_headers)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            page_imgs = _extract_imgs(soup)
+            img_urls.extend(page_imgs)
+
+            next_url = _find_next_page(soup, current_url)
+            if not next_url or next_url in visited:
+                break
+            current_url = next_url
 
         # 重複除去・ダウンロード
         seen: set[str] = set()
@@ -1167,8 +1206,7 @@ def create_app(
             seen.add(img_url)
             try:
                 r = _requests.get(img_url, timeout=30, headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                    "Referer": url,
+                    **_headers, "Referer": url,
                 })
                 if r.status_code != 200:
                     continue
