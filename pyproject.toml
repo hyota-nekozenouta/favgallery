@@ -5,6 +5,7 @@ description = "Browse and sync your X (Twitter) liked-media archive."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "beautifulsoup4>=4.12",
     "boto3>=1.38.0",
     "fastapi>=0.136.1",
     "gallery-dl>=1.32.1",
@@ -12,6 +13,7 @@ dependencies = [
     "imagehash>=4.3.2",
     "pillow>=12.2.0",
     "python-multipart>=0.0.20",
+    "requests>=2.31",
     "uvicorn>=0.46.0",
 ]
 

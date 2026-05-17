@@ -113,6 +113,18 @@ CREATE TABLE IF NOT EXISTS book_pages (
     height INTEGER,
     PRIMARY KEY (book_id, page_num)
 );
+
+CREATE TABLE IF NOT EXISTS book_tags (
+    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    tag TEXT NOT NULL,
+    PRIMARY KEY (book_id, tag)
+);
+CREATE INDEX IF NOT EXISTS book_tags_tag ON book_tags(tag);
+
+CREATE TABLE IF NOT EXISTS book_favorites (
+    book_id INTEGER PRIMARY KEY REFERENCES books(id) ON DELETE CASCADE,
+    added_at REAL NOT NULL
+);
 """
 
 
@@ -670,3 +682,44 @@ class Database:
         with self._lock:
             rows = self._conn.execute(sql, (book_id,)).fetchall()
         return [BookPage(book_id=r[0], page_num=r[1], rel_path=r[2], width=r[3], height=r[4]) for r in rows]
+
+    # --- Book Tags & Favorites ------------------------------------------------
+
+    def book_tags(self, book_id: int) -> list[str]:
+        with self._lock:
+            rows = self._conn.execute("SELECT tag FROM book_tags WHERE book_id = ?", (book_id,)).fetchall()
+        return [r[0] for r in rows]
+
+    def all_book_tags(self) -> list[tuple[str, int]]:
+        sql = "SELECT tag, COUNT(*) as cnt FROM book_tags GROUP BY tag ORDER BY cnt DESC, tag"
+        with self._lock:
+            return self._conn.execute(sql).fetchall()
+
+    def set_book_tags(self, book_id: int, tags: list[str]) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM book_tags WHERE book_id = ?", (book_id,))
+            if tags:
+                self._conn.executemany(
+                    "INSERT OR IGNORE INTO book_tags (book_id, tag) VALUES (?, ?)",
+                    [(book_id, t.strip()) for t in tags if t.strip()],
+                )
+
+    def toggle_book_favorite(self, book_id: int) -> bool:
+        with self._lock:
+            existing = self._conn.execute(
+                "SELECT 1 FROM book_favorites WHERE book_id = ?", (book_id,)
+            ).fetchone()
+            if existing:
+                self._conn.execute("DELETE FROM book_favorites WHERE book_id = ?", (book_id,))
+                return False
+            else:
+                self._conn.execute(
+                    "INSERT INTO book_favorites (book_id, added_at) VALUES (?, ?)",
+                    (book_id, time.time()),
+                )
+                return True
+
+    def book_favorite_ids(self) -> set[int]:
+        with self._lock:
+            rows = self._conn.execute("SELECT book_id FROM book_favorites").fetchall()
+        return {r[0] for r in rows}

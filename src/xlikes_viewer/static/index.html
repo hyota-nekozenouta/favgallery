@@ -24,7 +24,7 @@
       pointer-events: none;
     }
     .tile:hover .info { opacity: 1; }
-    .add-btn, .like-btn, .del-btn {
+    .add-btn, .like-btn, .del-btn, .fav-btn {
       position: absolute; top: 8px;
       width: 32px; height: 32px; border-radius: 50%;
       background: rgba(0,0,0,.7); color: white;
@@ -35,13 +35,15 @@
     .add-btn { right: 8px; }
     .like-btn { right: 48px; }
     .del-btn { right: 48px; }   /* takes the slot when like-btn is hidden */
+    .fav-btn { left: 8px; }
     .list-star {
       position: absolute; top: 6px; left: 6px;
       font-size: 28px; color: #facc15; line-height: 1;
       text-shadow: 0 1px 3px rgba(0,0,0,.8);
       pointer-events: none; z-index: 3;
     }
-    .tile:hover .add-btn, .tile:hover .like-btn, .tile:hover .del-btn { opacity: 1; }
+    .tile:hover .add-btn, .tile:hover .like-btn, .tile:hover .del-btn, .tile:hover .fav-btn { opacity: 1; }
+    .fav-btn.text-yellow-400 { opacity: 1; background: rgba(0,0,0,.5); }
     .add-btn:hover { background: #4f46e5; }
     .like-btn:hover { background: #e0245e; }
     .del-btn:hover { background: #b91c1c; }
@@ -187,18 +189,20 @@
           <span id="loadingIndicator" class="hidden text-base leading-none select-none">⏳</span>
           <button id="optionsBtn" class="text-zinc-500 hover:text-zinc-200 text-base p-1 rounded hover:bg-zinc-800" title="設定">⚙</button>
         </div>
-        <input id="searchBox" type="search" placeholder="検索 (作者・本文・タグ)"
-               class="mt-3 w-full bg-zinc-900 border border-zinc-800 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
+        <div id="sidebarPostsHeader">
+          <input id="searchBox" type="search" placeholder="検索 (作者・本文・タグ)"
+                 class="mt-3 w-full bg-zinc-900 border border-zinc-800 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-indigo-500" />
 
-        <div class="mt-3 grid grid-cols-3 gap-1 text-xs">
-          <button data-mt="" class="mt-btn chip rounded px-2 py-1 active">All</button>
-          <button data-mt="photo" class="mt-btn chip rounded px-2 py-1">Photo</button>
-          <button data-mt="video" class="mt-btn chip rounded px-2 py-1">Video</button>
+          <div class="mt-3 grid grid-cols-3 gap-1 text-xs">
+            <button data-mt="" class="mt-btn chip rounded px-2 py-1 active">All</button>
+            <button data-mt="photo" class="mt-btn chip rounded px-2 py-1">Photo</button>
+            <button data-mt="video" class="mt-btn chip rounded px-2 py-1">Video</button>
+          </div>
         </div>
 
       </div>
 
-      <div class="flex-1 overflow-y-auto scroll-thin">
+      <div id="sidebarPosts" class="flex-1 overflow-y-auto scroll-thin">
         <!-- Lists -->
         <div class="px-4 py-3 border-b border-zinc-800">
           <div class="flex items-center justify-between mb-2">
@@ -227,6 +231,26 @@
             タグ <span id="tagToggleIcon">▶</span>
           </button>
           <div id="tagList" class="flex flex-wrap gap-1 mt-2 hidden"></div>
+        </div>
+      </div>
+
+      <!-- Bookshelf Sidebar (hidden by default) -->
+      <div id="sidebarBooks" class="flex-1 overflow-y-auto scroll-thin hidden">
+        <div class="px-4 py-3 border-b border-zinc-800">
+          <button id="sidebarAddBookBtn" class="w-full px-3 py-2 rounded-md text-sm bg-indigo-600 hover:bg-indigo-500 text-white font-medium">+ 漫画を追加</button>
+        </div>
+        <!-- Favorites filter -->
+        <div class="px-4 py-3 border-b border-zinc-800">
+          <button id="bookFavFilter" class="w-full flex items-center gap-2 text-sm text-zinc-300 hover:text-white py-1 px-2 rounded hover:bg-zinc-800 transition-colors">
+            <span>⭐</span> <span>お気に入り</span> <span id="bookFavCount" class="ml-auto text-xs text-zinc-500">0</span>
+          </button>
+        </div>
+        <!-- Book Tags -->
+        <div class="px-4 py-3">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-xs uppercase tracking-wider text-zinc-500">🏷 タグ</div>
+          </div>
+          <div id="bookTagList" class="space-y-1"></div>
         </div>
       </div>
     </aside>
@@ -392,12 +416,17 @@ function switchTab(tab) {
   $('#tabBookshelf').classList.toggle('active', tab === 'bookshelf');
   $('#timelineRefreshBtn').classList.toggle('hidden', tab !== 'timeline');
   $('#markSeenBtn').classList.toggle('hidden', tab !== 'timeline');
+  // Toggle sidebar sections
+  $('#sidebarPosts').classList.toggle('hidden', tab === 'bookshelf');
+  $('#sidebarBooks').classList.toggle('hidden', tab !== 'bookshelf');
+  $('#sidebarPostsHeader').classList.toggle('hidden', tab === 'bookshelf');
   exitUnlikedMode();
   state.offset = 0; state.posts = []; state.dividerInserted = false;
   setupSeenObserver();          // turn observer on for timeline, off otherwise
   if (tab === 'bookshelf') {
     $('#masonry').innerHTML = '';
     fetchBooks();
+    loadBookTags();
   } else {
     fetchPosts();
   }
@@ -405,6 +434,19 @@ function switchTab(tab) {
 $('#tabLikes').addEventListener('click', () => switchTab('likes'));
 $('#tabTimeline').addEventListener('click', () => switchTab('timeline'));
 $('#tabBookshelf').addEventListener('click', () => switchTab('bookshelf'));
+
+// Bookshelf sidebar event listeners
+$('#sidebarAddBookBtn').addEventListener('click', () => openBookUpload());
+$('#bookFavFilter').addEventListener('click', () => {
+  if (bookFilter.type === 'favorite') {
+    bookFilter = { type: null, tag: null };
+  } else {
+    bookFilter = { type: 'favorite', tag: null };
+  }
+  renderBooks();
+  loadBookTags();
+  $('#bookFavFilter').classList.toggle('bg-zinc-800', bookFilter.type === 'favorite');
+});
 
 function updateReelHeight() {
   const h = document.getElementById('grid').clientHeight;
@@ -1761,6 +1803,9 @@ async function fetchBooks() {
   renderBooks();
 }
 
+// Bookshelf filter state
+let bookFilter = { type: null, tag: null }; // type: 'favorite' | 'tag' | null
+
 function renderBooks() {
   const m = $('#masonry');
   const addBtn = `<div class="tile cursor-pointer flex items-center justify-center border-2 border-dashed border-zinc-700 hover:border-indigo-500 rounded-lg" style="min-height:200px" id="bookAddTile">
@@ -1769,11 +1814,22 @@ function renderBooks() {
       <div class="text-sm">漫画を追加</div>
     </div>
   </div>`;
-  const tiles = state.books.map(b => {
+
+  // Apply filter
+  let filtered = state.books;
+  if (bookFilter.type === 'favorite') {
+    filtered = filtered.filter(b => b.is_favorite);
+  } else if (bookFilter.type === 'tag' && bookFilter.tag) {
+    filtered = filtered.filter(b => b.tags && b.tags.includes(bookFilter.tag));
+  }
+
+  const tiles = filtered.map(b => {
     const cover = b.cover_path ? `/thumb/${b.cover_path}?size=400` : '';
+    const favClass = b.is_favorite ? 'text-yellow-400' : 'text-zinc-600 hover:text-yellow-400';
     return `<div class="tile cursor-pointer" data-book-id="${b.id}">
       ${cover ? `<img src="${cover}" loading="lazy" alt="" />` : '<div class="bg-zinc-800 w-full" style="min-height:200px"></div>'}
       <button class="del-btn" data-del-book="${b.id}" title="削除">🗑</button>
+      <button class="fav-btn ${favClass}" data-fav-book="${b.id}" title="お気に入り">♥</button>
       <div class="info" style="opacity:1;position:relative;padding:8px 10px;background:rgba(0,0,0,.7)">
         <div class="truncate font-medium">${escapeHtml(b.title)}</div>
         <div class="text-zinc-400 text-xs">${b.page_count} ページ</div>
@@ -1795,9 +1851,75 @@ function renderBooks() {
     });
   });
 
-  // Book tile clicks
+  // Favorite buttons
+  m.querySelectorAll('[data-fav-book]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const bookId = btn.dataset.favBook;
+      const res = await fetch(`/api/books/${bookId}/favorite`, { method: 'POST' });
+      const data = await res.json();
+      // Update local state
+      const book = state.books.find(b => b.id == bookId);
+      if (book) book.is_favorite = data.favorite;
+      renderBooks();
+      loadBookTags();
+    });
+  });
+
+  // Book tile clicks — open tag editor on right-click, reader on left-click
   m.querySelectorAll('.tile[data-book-id]').forEach(el => {
     el.addEventListener('click', () => openReader(parseInt(el.dataset.bookId, 10)));
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openTagEditor(parseInt(el.dataset.bookId, 10));
+    });
+  });
+}
+
+function openTagEditor(bookId) {
+  const book = state.books.find(b => b.id === bookId);
+  if (!book) return;
+  const currentTags = (book.tags || []).join(', ');
+  const input = prompt(`タグ編集（カンマ区切り）\n「${book.title}」`, currentTags);
+  if (input === null) return;
+  const tags = input.split(',').map(t => t.trim()).filter(Boolean);
+  fetch(`/api/books/${bookId}/tags`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tags })
+  }).then(() => {
+    book.tags = tags;
+    renderBooks();
+    loadBookTags();
+  });
+}
+
+async function loadBookTags() {
+  const res = await fetch('/api/books/tags');
+  const data = await res.json();
+  const tagList = $('#bookTagList');
+  const favCount = state.books.filter(b => b.is_favorite).length;
+  $('#bookFavCount').textContent = favCount;
+
+  tagList.innerHTML = data.tags.map(t =>
+    `<button class="book-tag-btn w-full flex items-center gap-2 text-sm text-zinc-300 hover:text-white py-1 px-2 rounded hover:bg-zinc-800 transition-colors ${bookFilter.type === 'tag' && bookFilter.tag === t.name ? 'bg-zinc-800 text-white' : ''}" data-book-tag="${escapeHtml(t.name)}">
+      <span class="truncate">${escapeHtml(t.name)}</span>
+      <span class="ml-auto text-xs text-zinc-500">${t.count}</span>
+    </button>`
+  ).join('');
+
+  // Tag click handlers
+  tagList.querySelectorAll('.book-tag-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tag = btn.dataset.bookTag;
+      if (bookFilter.type === 'tag' && bookFilter.tag === tag) {
+        bookFilter = { type: null, tag: null };
+      } else {
+        bookFilter = { type: 'tag', tag };
+      }
+      renderBooks();
+      loadBookTags();
+    });
   });
 }
 

@@ -966,9 +966,14 @@ def create_app(
     @app.get("/api/books")
     def api_books() -> JSONResponse:
         items = db.books()
+        fav_ids = db.book_favorite_ids()
+        all_tags = {bid: [] for bid in [b.id for b in items]}
+        for b in items:
+            all_tags[b.id] = db.book_tags(b.id)
         return JSONResponse([
             {"id": b.id, "title": b.title, "cover_path": b.cover_path,
-             "page_count": b.page_count, "created_at": b.created_at}
+             "page_count": b.page_count, "created_at": b.created_at,
+             "is_favorite": b.id in fav_ids, "tags": all_tags[b.id]}
             for b in items
         ])
 
@@ -1081,6 +1086,30 @@ def create_app(
         book = db.get_book(book_id)
         return JSONResponse({"id": book.id, "title": book.title, "page_count": book.page_count})
 
+    # --- Book Tags & Favorites ---
+
+    @app.get("/api/books/tags")
+    def api_book_tags() -> JSONResponse:
+        tags = db.all_book_tags()
+        return JSONResponse({"tags": [{"name": t[0], "count": t[1]} for t in tags]})
+
+    class _BookTagsBody(BaseModel):
+        tags: list[str]
+
+    @app.put("/api/books/{book_id}/tags")
+    def api_set_book_tags(book_id: int, body: _BookTagsBody) -> JSONResponse:
+        if db.get_book(book_id) is None:
+            raise HTTPException(status_code=404, detail="book not found")
+        db.set_book_tags(book_id, body.tags)
+        return JSONResponse({"ok": True})
+
+    @app.post("/api/books/{book_id}/favorite")
+    def api_toggle_book_favorite(book_id: int) -> JSONResponse:
+        if db.get_book(book_id) is None:
+            raise HTTPException(status_code=404, detail="book not found")
+        new_state = db.toggle_book_favorite(book_id)
+        return JSONResponse({"favorite": new_state})
+
     # --- Book Import (URL → gallery-dl → bookshelf) -----------------------
 
     import_queue: list[dict] = []  # [{id, url, status, error, book_id, title, progress}]
@@ -1100,6 +1129,59 @@ def create_app(
             target=_import_worker, args=(item,), daemon=True
         ).start()
 
+    def _scrape_images_from_html(url: str, tmp_dir: Path) -> list[Path]:
+        """gallery-dl 非対応サイト向け: HTML から画像 URL を抽出してダウンロード"""
+        import requests as _requests
+        from bs4 import BeautifulSoup
+
+        resp = _requests.get(url, timeout=30, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        # div.single-img 内の img を優先
+        containers = soup.select("div.single-img img")
+        if not containers:
+            # fallback: 記事本文内の大きな画像を全取得
+            containers = soup.select("article img, .entry-content img, .post-content img")
+
+        img_urls: list[str] = []
+        for img in containers:
+            src = img.get("data-src") or img.get("data-lazy-src") or img.get("src")
+            if src and not src.split("?")[0].endswith((".svg", ".gif")):
+                if src.startswith("//"):
+                    src = "https:" + src
+                elif src.startswith("/"):
+                    from urllib.parse import urlparse
+                    parsed = urlparse(url)
+                    src = f"{parsed.scheme}://{parsed.netloc}{src}"
+                img_urls.append(src)
+
+        # 重複除去・ダウンロード
+        seen: set[str] = set()
+        files: list[Path] = []
+        for i, img_url in enumerate(img_urls, 1):
+            if img_url in seen:
+                continue
+            seen.add(img_url)
+            try:
+                r = _requests.get(img_url, timeout=30, headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "Referer": url,
+                })
+                if r.status_code != 200:
+                    continue
+                ext = Path(img_url.split("?")[0]).suffix.lower() or ".jpg"
+                if ext not in {".jpg", ".jpeg", ".png", ".webp", ".avif", ".bmp"}:
+                    ext = ".jpg"
+                dest = tmp_dir / f"{i:04d}{ext}"
+                dest.write_bytes(r.content)
+                files.append(dest)
+            except Exception:
+                continue
+        return files
+
     def _import_worker(item: dict) -> None:
         import re
         import subprocess
@@ -1111,6 +1193,8 @@ def create_app(
             tmp_dir = tempfile.mkdtemp(prefix="book_import_")
             tmp_path = Path(tmp_dir)
 
+            # Try gallery-dl first
+            gdl_failed = False
             cfg = {
                 "extractor": {
                     "base-directory": tmp_dir.replace("\\", "/") + "/",
@@ -1126,19 +1210,27 @@ def create_app(
             with import_queue_lock:
                 item["progress"] = "ダウンロード中..."
 
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-
-            if result.returncode != 0:
-                with import_queue_lock:
-                    item["error"] = f"gallery-dl failed: {result.stderr[:500]}"
-                    item["status"] = "error"
-                return
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                if result.returncode != 0:
+                    gdl_failed = True
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                gdl_failed = True
 
             image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".bmp"}
             all_files: list[Path] = []
             for f in sorted(tmp_path.rglob("*")):
                 if f.is_file() and f.suffix.lower() in image_exts:
                     all_files.append(f)
+
+            # Fallback: HTML scraping if gallery-dl failed or found no images
+            if not all_files and (gdl_failed or True):
+                with import_queue_lock:
+                    item["progress"] = "HTML から画像を取得中..."
+                try:
+                    all_files = _scrape_images_from_html(url, tmp_path)
+                except Exception as scrape_err:
+                    pass  # fall through to empty check below
 
             if not all_files:
                 with import_queue_lock:
