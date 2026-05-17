@@ -1129,58 +1129,23 @@ def create_app(
             target=_import_worker, args=(item,), daemon=True
         ).start()
 
-    def _scrape_images_from_html(url: str, tmp_dir: Path) -> list[Path]:
-        """gallery-dl 非対応サイト向け: HTML から全ページの画像を取得"""
+    # --- Site-specific scrapers ---
+
+    def _scrape_doujin_freee(url: str, tmp_dir: Path) -> list[Path]:
+        """doujin-freee.cc 専用: div.single-img 内の img を全ページ取得"""
         import requests as _requests
         from bs4 import BeautifulSoup
-        from urllib.parse import urlparse, urljoin
+        from urllib.parse import urljoin
 
         _headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
 
-        def _extract_imgs(soup):
-            """ページ内の漫画画像 URL を抽出"""
-            containers = soup.select("div.single-img img")
-            if not containers:
-                containers = soup.select("article img, .entry-content img, .post-content img")
-            urls = []
-            for img in containers:
-                src = img.get("data-src") or img.get("data-lazy-src") or img.get("src")
-                if src and not src.split("?")[0].endswith((".svg", ".gif")):
-                    if src.startswith("//"):
-                        src = "https:" + src
-                    elif src.startswith("/"):
-                        parsed = urlparse(url)
-                        src = f"{parsed.scheme}://{parsed.netloc}{src}"
-                    urls.append(src)
-            return urls
-
-        def _find_next_page(soup, current_url):
-            """次のページ URL を探す (WordPress ページネーション)"""
-            # パターン1: rel="next" リンク
-            link = soup.find("a", rel="next")
-            if link and link.get("href"):
-                return urljoin(current_url, link["href"])
-            # パターン2: "next" クラスのリンク
-            link = soup.select_one("a.next, .nav-next a, .pagination .next a, a.nextpostslink")
-            if link and link.get("href"):
-                return urljoin(current_url, link["href"])
-            # パターン3: ページ番号リンク（現在のページ+1）
-            current = soup.select_one(".current, .page-numbers.current, span.current")
-            if current:
-                next_sib = current.find_next_sibling("a")
-                if next_sib and next_sib.get("href"):
-                    return urljoin(current_url, next_sib["href"])
-            return None
-
-        # 全ページを巡回して画像 URL を収集
         img_urls: list[str] = []
         visited: set[str] = set()
         current_url = url
-        max_pages = 100  # 安全制限
 
-        for _ in range(max_pages):
+        for _ in range(100):
             if current_url in visited:
                 break
             visited.add(current_url)
@@ -1189,11 +1154,30 @@ def create_app(
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "html.parser")
 
-            page_imgs = _extract_imgs(soup)
-            img_urls.extend(page_imgs)
+            # div.single-img 内の img のみ取得（漫画本体）
+            for img in soup.select("div.single-img img"):
+                src = img.get("data-src") or img.get("data-lazy-src") or img.get("src")
+                if src:
+                    if src.startswith("//"):
+                        src = "https:" + src
+                    elif not src.startswith("http"):
+                        src = urljoin(current_url, src)
+                    img_urls.append(src)
 
-            next_url = _find_next_page(soup, current_url)
-            if not next_url or next_url in visited:
+            # ページネーション: 投稿内ページ送り（/2/, /3/ ...）
+            # doujin-freee は .page-links 内に数字リンクがある
+            next_url = None
+            page_nav = soup.select(".page-links a, .post-page-numbers a, .pagination a")
+            for link in page_nav:
+                href = link.get("href")
+                if not href:
+                    continue
+                full = urljoin(current_url, href)
+                if full not in visited:
+                    next_url = full
+                    break
+
+            if not next_url:
                 break
             current_url = next_url
 
@@ -1208,6 +1192,56 @@ def create_app(
                 r = _requests.get(img_url, timeout=30, headers={
                     **_headers, "Referer": url,
                 })
+                if r.status_code != 200:
+                    continue
+                ext = Path(img_url.split("?")[0]).suffix.lower() or ".jpg"
+                if ext not in {".jpg", ".jpeg", ".png", ".webp", ".avif", ".bmp"}:
+                    ext = ".jpg"
+                dest = tmp_dir / f"{i:04d}{ext}"
+                dest.write_bytes(r.content)
+                files.append(dest)
+            except Exception:
+                continue
+        return files
+
+    def _scrape_images_from_html(url: str, tmp_dir: Path) -> list[Path]:
+        """サイトに応じたスクレイパーを選択して実行"""
+        from urllib.parse import urlparse
+        host = urlparse(url).netloc.lower()
+
+        # サイト別ルーティング
+        if "doujin-freee" in host:
+            return _scrape_doujin_freee(url, tmp_dir)
+
+        # 未対応サイト: 汎用フォールバック（1ページ目のみ）
+        import requests as _requests
+        from bs4 import BeautifulSoup
+        from urllib.parse import urljoin
+
+        _headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        resp = _requests.get(url, timeout=30, headers=_headers)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        imgs = soup.select("article img, .entry-content img, .post-content img")
+        img_urls = []
+        for img in imgs:
+            src = img.get("data-src") or img.get("data-lazy-src") or img.get("src")
+            if src and not src.split("?")[0].endswith((".svg", ".gif", ".ico")):
+                if not src.startswith("http"):
+                    src = urljoin(url, src)
+                img_urls.append(src)
+
+        seen: set[str] = set()
+        files: list[Path] = []
+        for i, img_url in enumerate(img_urls, 1):
+            if img_url in seen:
+                continue
+            seen.add(img_url)
+            try:
+                r = _requests.get(img_url, timeout=30, headers={**_headers, "Referer": url})
                 if r.status_code != 200:
                     continue
                 ext = Path(img_url.split("?")[0]).suffix.lower() or ".jpg"
