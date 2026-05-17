@@ -1951,7 +1951,7 @@ function renderReaderPage() {
   if (!pages.length) return;
   const p = pages[pos];
   const img = document.getElementById('readerImg');
-  img.src = `/media/${p.rel_path}`;
+  img.src = `/api/media/${p.rel_path}`;
   document.getElementById('readerPageNum').textContent = `${pos + 1} / ${pages.length}`;
 }
 

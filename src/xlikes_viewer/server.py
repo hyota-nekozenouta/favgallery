@@ -1032,6 +1032,22 @@ def create_app(
             with db._lock:
                 db._conn.execute("UPDATE books SET cover_path = ? WHERE id = ?", (cover_rel, book.id))
 
+        # Upload to R2 if configured, then delete local copies
+        if r2_client is not None:
+            for i, f in enumerate(sorted_files, start=1):
+                ext = Path(f.filename or "page.jpg").suffix.lower() or ".jpg"
+                filename = f"{i:04d}{ext}"
+                local_path = book_dir / filename
+                key = f"{_BOOKS_DIR}/{book.id}/{filename}"
+                try:
+                    r2_client.upload_file(local_path, key)
+                    local_path.unlink()
+                except Exception:
+                    pass  # Keep local if R2 fails
+            # Remove empty directory
+            if book_dir.exists() and not any(book_dir.iterdir()):
+                book_dir.rmdir()
+
         return JSONResponse({"id": book.id, "title": book.title, "page_count": len(pages)}, status_code=201)
 
     @app.delete("/api/books/{book_id}")
@@ -1190,6 +1206,20 @@ def create_app(
                     db._conn.execute(
                         "UPDATE books SET cover_path = ? WHERE id = ?", (cover_rel, book.id)
                     )
+
+            # Upload to R2 if configured, then delete local copies
+            if r2_client is not None:
+                for page_num, rel, _w, _h in pages:
+                    local_path = library_root / rel
+                    if local_path.is_file():
+                        try:
+                            r2_client.upload_file(local_path, rel)
+                            local_path.unlink()
+                        except Exception:
+                            pass  # Keep local if R2 fails
+                # Remove empty directory
+                if book_dir.exists() and not any(book_dir.iterdir()):
+                    book_dir.rmdir()
 
             with import_lock:
                 import_state["book_id"] = book.id
