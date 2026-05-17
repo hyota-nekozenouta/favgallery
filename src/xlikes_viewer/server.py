@@ -62,6 +62,10 @@ class _MeBody(BaseModel):
     username: str
 
 
+class _BookImportBody(BaseModel):
+    url: str
+
+
 _LAST_SEEN_KEY = "last_seen_timeline_tweet_id"
 _MY_USERNAME_KEY = "my_username"
 
@@ -1050,9 +1054,6 @@ def create_app(
         return JSONResponse({"id": book.id, "title": book.title, "page_count": book.page_count})
 
     # --- Book Import (URL → gallery-dl → bookshelf) -----------------------
-
-    class _BookImportBody(BaseModel):
-        url: str
 
     import_state: dict[str, object] = {
         "running": False,
