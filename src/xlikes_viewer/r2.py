@@ -11,9 +11,9 @@ Install the optional dependency:
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Set
 
 
 @dataclass(frozen=True)
@@ -88,13 +88,13 @@ class R2Client:
         except Exception:
             return False
 
-    def list_all_keys(self) -> Set[str]:
+    def list_all_keys(self) -> set[str]:
         """Return the set of all object keys in the bucket.
 
         Uses paginated list_objects_v2 — far faster than per-file head_object
         when checking many files at once.
         """
-        keys: Set[str] = set()
+        keys: set[str] = set()
         paginator = self._client.get_paginator("list_objects_v2")
         for page in paginator.paginate(Bucket=self._bucket):
             for obj in page.get("Contents", []):

@@ -21,16 +21,23 @@ from pydantic import BaseModel
 
 from xlikes_viewer.book_dedup import (
     BookIndexRunner,
-    fingerprint_for_ordered_files,
     find_duplicate_book,
+    fingerprint_for_ordered_files,
 )
 from xlikes_viewer.db import Database, TimelinePost
 from xlikes_viewer.dedup import DedupRunner, VisualDedupRunner
 from xlikes_viewer.like import like_tweet
+from xlikes_viewer.paths import portable_root
 from xlikes_viewer.proxy import CdnProxy, is_allowed
 from xlikes_viewer.r2 import R2Client, r2_config_from_env
 from xlikes_viewer.save_one import save_tweet
-from xlikes_viewer.scanner import DEFAULT_LIBRARY, Index, Post, build_index_from_db, ingest_to_db, scan_library
+from xlikes_viewer.scanner import (
+    DEFAULT_LIBRARY,
+    Index,
+    Post,
+    build_index_from_db,
+    ingest_to_db,
+)
 from xlikes_viewer.sync import SyncRunner
 from xlikes_viewer.thumbs import thumbnail_bytes, thumbnail_bytes_from_raw
 from xlikes_viewer.timeline import (
@@ -38,7 +45,6 @@ from xlikes_viewer.timeline import (
     fetch_author_media_posts,
     fetch_my_liked_tweet_ids,
 )
-from xlikes_viewer.paths import portable_root
 from xlikes_viewer.x_helpers import tweet_url
 
 
@@ -351,7 +357,7 @@ def create_app(
             idx = build_index_from_db(db, library_root)
             with state_lock:
                 state["index"] = idx
-        except Exception as exc:
+        except Exception:
             import traceback
             traceback.print_exc()
         finally:
@@ -1101,8 +1107,9 @@ def create_app(
             # Try to get dimensions
             w, h = None, None
             try:
-                from PIL import Image
                 import io
+
+                from PIL import Image
                 img = Image.open(io.BytesIO(content))
                 w, h = img.size
             except Exception:
@@ -1290,9 +1297,10 @@ def create_app(
             return _scrape_doujin_freee(url, tmp_dir)
 
         # 未対応サイト: 汎用フォールバック（1ページ目のみ）
+        from urllib.parse import urljoin
+
         import requests as _requests
         from bs4 import BeautifulSoup
-        from urllib.parse import urljoin
 
         _headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -1377,7 +1385,7 @@ def create_app(
                     item["progress"] = "HTML から画像を取得中..."
                 try:
                     all_files = _scrape_images_from_html(url, tmp_path)
-                except Exception as scrape_err:
+                except Exception:
                     pass  # fall through to empty check below
 
             if not all_files:

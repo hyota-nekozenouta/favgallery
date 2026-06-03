@@ -121,8 +121,8 @@ class SyncRunner:
         After upload, deletes successfully uploaded AND already-in-R2 files to
         free Railway volume space.
         """
-        assert self._r2_client is not None  # noqa: S101 — caller guarantee
-        assert self._library_root is not None  # noqa: S101 — caller guarantee
+        assert self._r2_client is not None
+        assert self._library_root is not None
         library = self._library_root
 
         # Fetch the full R2 key set once (paginated list) instead of per-file HEAD
@@ -213,7 +213,6 @@ class SyncRunner:
         Runs in a parallel thread during gallery-dl download so that disk
         usage stays bounded. Checks every 5 seconds for new media files.
         """
-        import time as _time
 
         if self._r2_client is None or self._library_root is None:
             return
