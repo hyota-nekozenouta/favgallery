@@ -26,6 +26,7 @@ from xlikes_viewer.book_dedup import (
 )
 from xlikes_viewer.db import Database, TimelinePost
 from xlikes_viewer.dedup import DedupRunner, VisualDedupRunner
+from xlikes_viewer.gallerydl_config import build_book_import_config, write_gallerydl_config
 from xlikes_viewer.keys import r2_key_for_path
 from xlikes_viewer.like import like_tweet
 from xlikes_viewer.paths import portable_root
@@ -98,53 +99,8 @@ def _write_cookies_from_env(cookies_path: Path) -> None:
 
 
 def _ensure_gallerydl_config(config_path: Path, library_root: Path) -> None:
-    """Write gallery-dl.json with current absolute paths.
-
-    Called at startup so moving the portable folder to another PC automatically
-    fixes stale paths (cookies, ffmpeg, base-directory, archive).
-    Runs in both portable (Windows) and server (Railway) layouts.
-    """
-    def _fwd(p: Path) -> str:
-        return str(p).replace("\\", "/")
-
-    data_dir = library_root.parent
-    if portable_root() is not None:
-        bundle_root = library_root.parent.parent
-        ffmpeg_exe = bundle_root / "ffmpeg" / "bin" / "ffmpeg.exe"
-        ffmpeg_location: str = _fwd(ffmpeg_exe) if ffmpeg_exe.exists() else "ffmpeg"
-    else:
-        # Railway: ffmpeg is on PATH
-        ffmpeg_location = "ffmpeg"
-
-    desired: dict = {
-        "extractor": {
-            "base-directory": _fwd(library_root) + "/",
-            "archive": _fwd(library_root / "archive.sqlite"),
-            "twitter": {
-                "cookies": _fwd(data_dir / "cookies.txt"),
-                "videos": True,
-                "retweets": False,
-                "text-tweets": False,
-                "filename": "{tweet_id}_{num}.{extension}",
-                "directory": ["{user[name]}"],
-                "postprocessors": [{"name": "metadata", "mode": "json"}],
-            },
-        },
-        "downloader": {
-            "mtime": True,
-            "ffmpeg-location": ffmpeg_location,
-        },
-        "output": {"progress": True},
-    }
-
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    if config_path.exists():
-        try:
-            if _json.loads(config_path.read_text(encoding="utf-8")) == desired:
-                return
-        except (OSError, _json.JSONDecodeError):
-            pass
-    config_path.write_text(_json.dumps(desired, indent=2, ensure_ascii=False), encoding="utf-8")
+    """Backwards-compatible shim — see gallerydl_config.write_gallerydl_config."""
+    write_gallerydl_config(config_path, library_root)
 
 
 def _base_payload(
@@ -1352,14 +1308,7 @@ def create_app(
 
             # Try gallery-dl first
             gdl_failed = False
-            cfg = {
-                "extractor": {
-                    "base-directory": tmp_dir.replace("\\", "/") + "/",
-                    "directory": [],
-                    "filename": "{num:>04}.{extension}",
-                    "postprocessors": [{"name": "metadata", "mode": "json"}],
-                }
-            }
+            cfg = build_book_import_config(tmp_dir)
             cfg_path = Path(tmp_dir) / "gdl_config.json"
             cfg_path.write_text(_json.dumps(cfg), encoding="utf-8")
 
