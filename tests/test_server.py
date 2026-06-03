@@ -258,7 +258,7 @@ def test_author_unliked_filters_local_archive(
         assert author == "alice"
         return fake_posts
 
-    monkeypatch.setattr(server_module, "fetch_author_media_posts", fake_fetch)
+    monkeypatch.setattr("xlikes_viewer.routers.posts.fetch_author_media_posts", fake_fetch)
     app = create_app(library_root=fake_library, scan_in_background=False)
     client = TestClient(app)
     r = client.get("/api/authors/alice/unliked")
@@ -279,7 +279,7 @@ def test_author_unliked_propagates_gallerydl_failure(
     def boom(*_a: object, **_kw: object) -> None:
         raise RuntimeError("auth missing")
 
-    monkeypatch.setattr(server_module, "fetch_author_media_posts", boom)
+    monkeypatch.setattr("xlikes_viewer.routers.posts.fetch_author_media_posts", boom)
     app = create_app(library_root=fake_library, scan_in_background=False)
     client = TestClient(app)
     r = client.get("/api/authors/alice/unliked")
@@ -313,7 +313,7 @@ def test_author_unliked_filters_x_side_favorited(
     def fake_fetch(_cfg: object, _author: str, *, range_spec: str) -> list[TimelinePost]:
         return fake_posts
 
-    monkeypatch.setattr(server_module, "fetch_author_media_posts", fake_fetch)
+    monkeypatch.setattr("xlikes_viewer.routers.posts.fetch_author_media_posts", fake_fetch)
     app = create_app(library_root=fake_library, scan_in_background=False)
     client = TestClient(app)
     r = client.get("/api/authors/alice/unliked")
@@ -335,7 +335,7 @@ def test_author_unliked_pagination_offset(
         captured["range_spec"] = range_spec
         return []
 
-    monkeypatch.setattr(server_module, "fetch_author_media_posts", fake_fetch)
+    monkeypatch.setattr("xlikes_viewer.routers.posts.fetch_author_media_posts", fake_fetch)
     app = create_app(library_root=fake_library, scan_in_background=False)
     client = TestClient(app)
 
@@ -423,8 +423,7 @@ def test_unliked_filters_out_my_likes(
         )
 
     monkeypatch.setattr(
-        server_module,
-        "fetch_author_media_posts",
+        "xlikes_viewer.routers.posts.fetch_author_media_posts",
         lambda *_a, **_kw: [make("5001"), make("5002"), make("5003")],
     )
     app = create_app(library_root=fake_library, scan_in_background=False)

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import base64
-import contextlib
-import dataclasses
 import hashlib
 import json as _json
 import os
@@ -28,15 +26,15 @@ from xlikes_viewer.context import AppContext
 from xlikes_viewer.db import Database
 from xlikes_viewer.dedup import DedupRunner, VisualDedupRunner
 from xlikes_viewer.gallerydl_config import build_book_import_config, write_gallerydl_config
-from xlikes_viewer.keys import r2_key_for_path
 from xlikes_viewer.like import like_tweet
 from xlikes_viewer.paths import portable_root
-from xlikes_viewer.payloads import _post_payload, _timeline_payload
+from xlikes_viewer.payloads import _timeline_payload
 from xlikes_viewer.proxy import CdnProxy, is_allowed
 from xlikes_viewer.r2 import R2Client, r2_config_from_env
 from xlikes_viewer.routers import admin as admin_router
 from xlikes_viewer.routers import dedup as dedup_router
 from xlikes_viewer.routers import lists as lists_router
+from xlikes_viewer.routers import posts as posts_router
 from xlikes_viewer.routers import sync as sync_router
 from xlikes_viewer.save_one import save_tweet
 from xlikes_viewer.scanner import (
@@ -49,13 +47,8 @@ from xlikes_viewer.sync import SyncRunner
 from xlikes_viewer.thumbs import thumbnail_bytes, thumbnail_bytes_from_raw
 from xlikes_viewer.timeline import (
     TimelineRefresher,
-    fetch_author_media_posts,
     fetch_my_liked_tweet_ids,
 )
-
-
-class _FavAuthorsBody(BaseModel):
-    authors: list[str]
 
 
 class _LikeAndSaveBody(BaseModel):
@@ -243,75 +236,6 @@ def create_app(
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-    @app.get("/api/library")
-    def api_library() -> JSONResponse:
-        idx = _index()
-        with state_lock:
-            scanning = bool(state.get("scanning", False))
-        return JSONResponse(
-            {
-                "library_root": str(idx.library_root),
-                "post_count": len(idx.posts),
-                "authors": [dataclasses.asdict(a) for a in idx.authors.values()],
-                "tags": [{"name": k, "count": v} for k, v in list(idx.tags.items())[:200]],
-                "scanning": scanning,
-            }
-        )
-
-    @app.post("/api/library/refresh")
-    def api_refresh() -> JSONResponse:
-        idx = _refresh_index()
-        return JSONResponse({"post_count": len(idx.posts)})
-
-    @app.get("/api/posts")
-    def api_posts(
-        author: str | None = None,
-        tag: str | None = None,
-        media_type: str | None = None,
-        q: str | None = None,
-        list_id: int | None = Query(default=None, alias="list"),
-        limit: int = Query(default=100, ge=1, le=500),
-        offset: int = Query(default=0, ge=0),
-    ) -> JSONResponse:
-        idx = _index()
-        filtered = idx.filter(author=author, tag=tag, media_type=media_type, query=q)
-        if list_id is not None:
-            keys = db.posts_in_list(list_id)
-            filtered = [p for p in filtered if (p.tweet_id, p.num) in keys]
-        total = len(filtered)
-        page = filtered[offset : offset + limit]
-        listed_keys = db.all_listed_post_keys()
-        items = [_post_payload(p) for p in page]
-        for item, p in zip(items, page):
-            item["in_any_list"] = (p.tweet_id, p.num) in listed_keys
-        return JSONResponse(
-            {
-                "total": total,
-                "items": items,
-                "offset": offset,
-                "limit": limit,
-            }
-        )
-
-    @app.get("/api/posts/by-tweet/{tweet_id}")
-    def api_posts_by_tweet(tweet_id: str) -> JSONResponse:
-        idx = _index()
-        items = sorted(
-            (p for p in idx.posts if p.tweet_id == tweet_id),
-            key=lambda p: p.num,
-        )
-        return JSONResponse({"items": [_post_payload(p) for p in items]})
-
-    @app.get("/api/authors/{author}/summary")
-    def api_author_summary(author: str) -> JSONResponse:
-        idx = _index()
-        posts = [p for p in idx.posts if p.author_name == author]
-        counts: dict[str, int] = {"total": len(posts)}
-        for p in posts:
-            counts[p.media_type] = counts.get(p.media_type, 0) + 1
-        nick = posts[0].author_nick if posts else ""
-        return JSONResponse({"author": author, "nick": nick, "counts": counts})
-
     # Serialize gallery-dl invocations: prepare_config touches global state.
     unliked_lock = threading.Lock()
 
@@ -332,117 +256,7 @@ def create_app(
     )
     app.state.sync_runner = sync_runner
 
-    @app.get("/api/authors/{author}/unliked")
-    def api_author_unliked(
-        author: str,
-        limit: int = Query(default=60, ge=1, le=200),
-        offset: int = Query(default=0, ge=0, le=10000),
-    ) -> JSONResponse:
-        idx = _index()
-        local_tweet_ids = {p.tweet_id for p in idx.posts if p.author_name == author}
-        my_liked_ids = db.my_likes_ids()
-        # gallery-dl uses 1-based inclusive ranges (`file-range`).
-        start = offset + 1
-        end = offset + limit
-        try:
-            with unliked_lock:
-                posts = fetch_author_media_posts(
-                    gallerydl_config_path,
-                    author,
-                    range_spec=f"{start}-{end}",
-                )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"gallery-dl failed: {type(exc).__name__}: {exc}",
-            ) from exc
-        # "Unliked" = on X, but: not in my_likes cache (own liked tweets),
-        # not in local likes archive, and not flagged as `favorited` in the
-        # raw metadata (defensive — gallery-dl currently does not surface it).
-        unliked = [
-            p for p in posts
-            if not p.favorited
-            and p.tweet_id not in local_tweet_ids
-            and p.tweet_id not in my_liked_ids
-        ]
-        # has_more is heuristic: gallery-dl returns up to `limit` items per
-        # batch, so if we got a full page we assume there might be more.
-        return JSONResponse(
-            {
-                "author": author,
-                "fetched": len(posts),
-                "offset": offset,
-                "limit": limit,
-                "has_more": len(posts) >= limit,
-                "items": [_timeline_payload(p) for p in unliked],
-            }
-        )
-
     library_root_resolved = library_root.resolve()
-
-    @app.delete("/api/posts/{tweet_id}/{num}")
-    def delete_post(tweet_id: str, num: int) -> JSONResponse:
-        idx = _index()
-        target = next(
-            (p for p in idx.posts if p.tweet_id == tweet_id and p.num == num),
-            None,
-        )
-        if target is None:
-            raise HTTPException(status_code=404, detail="post not found")
-
-        media = target.media_path.resolve()
-        try:
-            media.relative_to(library_root_resolved)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail="path escape") from e
-
-        # Sidecar lives next to the media file as "<media>.json". Derive it from
-        # the media path rather than target.json_path: the DB-backed index sets
-        # json_path == media_path as a placeholder (unused when serving from R2),
-        # so target.json_path is unreliable here.
-        sidecar = media.with_name(media.name + ".json")
-        rel = r2_key_for_path(media, library_root_resolved)
-
-        with contextlib.suppress(FileNotFoundError):
-            media.unlink()
-        with contextlib.suppress(FileNotFoundError):
-            sidecar.unlink()
-
-        # In R2-backed deployments the media lives in R2 (the local copy is
-        # deleted after upload), so unlink() above is a no-op there. Purge the
-        # R2 object too — otherwise every delete leaks an orphaned media file in
-        # the bucket. The object key is the library-relative posix path (== how
-        # the sync/upload path derives keys). A failure here must NOT fail the
-        # user's delete: the DB row + local files are already gone, so the post
-        # has left the index regardless; an orphan is recoverable later.
-        if r2_client is not None:
-            try:
-                r2_client.delete_object(rel)
-            except Exception as exc:  # degrade gracefully like other R2 calls
-                print(f"[r2] delete_object failed for {rel}: {exc}")
-
-        # Drop the DB row so the post leaves the index for good — otherwise a
-        # later sidecar re-ingest (_refresh_index) resurrects it. Lists + hash
-        # cache: cascade cleanup so they don't outlive the file. The gallery-dl
-        # archive.sqlite is intentionally untouched so the next sync does not
-        # re-download this tweet's media.
-        db.delete_post(tweet_id, num)
-        db.remove_item_from_all_lists(tweet_id, num)
-        db.forget_hash(rel)
-        _refresh_index()
-        return JSONResponse({"deleted": True})
-
-    # --- Lists ---------------------------------------------------------
-
-    @app.get("/api/favorite-authors")
-    def fav_authors_get() -> JSONResponse:
-        return JSONResponse(db.get_favorite_authors())
-
-    @app.post("/api/favorite-authors")
-    def fav_authors_set(body: _FavAuthorsBody) -> JSONResponse:
-        db.set_favorite_authors(body.authors)
-        return JSONResponse({"saved": True})
-
 
     # --- Timeline ------------------------------------------------------
 
@@ -1267,6 +1081,7 @@ def create_app(
     app.include_router(admin_router.router)
     app.include_router(dedup_router.router)
     app.include_router(lists_router.router)
+    app.include_router(posts_router.router)
 
     return app
 
