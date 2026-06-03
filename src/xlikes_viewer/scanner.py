@@ -176,7 +176,7 @@ def scan_library(root: Path = DEFAULT_LIBRARY) -> Index:
 _SIDECAR_KEY_RE = re.compile(r"^(\d+)_(\d+)\.[^.]+\.json$")
 
 
-def ingest_to_db(root: Path, db: "Database") -> int:
+def ingest_to_db(root: Path, db: Database) -> int:
     """Walk local JSON sidecars and upsert *new* posts into the DB.
 
     Incremental: posts already present in the DB are recognised from the
@@ -225,7 +225,7 @@ def ingest_to_db(root: Path, db: "Database") -> int:
     return count
 
 
-def build_index_from_db(db: "Database", library_root: Path) -> Index:
+def build_index_from_db(db: Database, library_root: Path) -> Index:
     """Build an Index from the DB posts table instead of filesystem scan."""
     index = Index(library_root=library_root)
     rows = db.all_posts()

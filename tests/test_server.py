@@ -12,7 +12,6 @@ from fastapi.testclient import TestClient
 from tests.conftest import _write_post
 from xlikes_viewer.server import create_app
 
-
 # ---------------------------------------------------------------------------
 # Basic auth tests
 # ---------------------------------------------------------------------------
@@ -238,7 +237,6 @@ def test_author_summary_video(client: TestClient) -> None:
 def test_author_unliked_filters_local_archive(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path
 ) -> None:
-    from xlikes_viewer import server as server_module
     from xlikes_viewer.db import TimelinePost
 
     def make(tweet_id: str) -> TimelinePost:
@@ -258,7 +256,7 @@ def test_author_unliked_filters_local_archive(
         assert author == "alice"
         return fake_posts
 
-    monkeypatch.setattr(server_module, "fetch_author_media_posts", fake_fetch)
+    monkeypatch.setattr("xlikes_viewer.routers.posts.fetch_author_media_posts", fake_fetch)
     app = create_app(library_root=fake_library, scan_in_background=False)
     client = TestClient(app)
     r = client.get("/api/authors/alice/unliked")
@@ -274,12 +272,11 @@ def test_author_unliked_filters_local_archive(
 def test_author_unliked_propagates_gallerydl_failure(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path
 ) -> None:
-    from xlikes_viewer import server as server_module
 
     def boom(*_a: object, **_kw: object) -> None:
         raise RuntimeError("auth missing")
 
-    monkeypatch.setattr(server_module, "fetch_author_media_posts", boom)
+    monkeypatch.setattr("xlikes_viewer.routers.posts.fetch_author_media_posts", boom)
     app = create_app(library_root=fake_library, scan_in_background=False)
     client = TestClient(app)
     r = client.get("/api/authors/alice/unliked")
@@ -291,7 +288,6 @@ def test_author_unliked_propagates_gallerydl_failure(
 def test_author_unliked_filters_x_side_favorited(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path
 ) -> None:
-    from xlikes_viewer import server as server_module
     from xlikes_viewer.db import TimelinePost
 
     def make(tweet_id: str, *, favorited: bool) -> TimelinePost:
@@ -313,7 +309,7 @@ def test_author_unliked_filters_x_side_favorited(
     def fake_fetch(_cfg: object, _author: str, *, range_spec: str) -> list[TimelinePost]:
         return fake_posts
 
-    monkeypatch.setattr(server_module, "fetch_author_media_posts", fake_fetch)
+    monkeypatch.setattr("xlikes_viewer.routers.posts.fetch_author_media_posts", fake_fetch)
     app = create_app(library_root=fake_library, scan_in_background=False)
     client = TestClient(app)
     r = client.get("/api/authors/alice/unliked")
@@ -327,7 +323,6 @@ def test_author_unliked_pagination_offset(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path
 ) -> None:
     """Offset must translate into a 1-based gallery-dl range."""
-    from xlikes_viewer import server as server_module
 
     captured: dict[str, str] = {}
 
@@ -335,7 +330,7 @@ def test_author_unliked_pagination_offset(
         captured["range_spec"] = range_spec
         return []
 
-    monkeypatch.setattr(server_module, "fetch_author_media_posts", fake_fetch)
+    monkeypatch.setattr("xlikes_viewer.routers.posts.fetch_author_media_posts", fake_fetch)
     app = create_app(library_root=fake_library, scan_in_background=False)
     client = TestClient(app)
 
@@ -409,7 +404,6 @@ def test_me_likes_sync_requires_username(client: TestClient) -> None:
 def test_unliked_filters_out_my_likes(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path
 ) -> None:
-    from xlikes_viewer import server as server_module
     from xlikes_viewer.db import TimelinePost
 
     def make(tweet_id: str) -> TimelinePost:
@@ -423,8 +417,7 @@ def test_unliked_filters_out_my_likes(
         )
 
     monkeypatch.setattr(
-        server_module,
-        "fetch_author_media_posts",
+        "xlikes_viewer.routers.posts.fetch_author_media_posts",
         lambda *_a, **_kw: [make("5001"), make("5002"), make("5003")],
     )
     app = create_app(library_root=fake_library, scan_in_background=False)
@@ -544,14 +537,13 @@ def test_like_and_save_records_my_like(
 ) -> None:
     from xlikes_viewer import like as like_module
     from xlikes_viewer import save_one as save_module
-    from xlikes_viewer import server as server_module
 
     monkeypatch.setattr(
-        server_module, "like_tweet",
+        "xlikes_viewer.routers.timeline.like_tweet",
         lambda *_a, **_kw: like_module.LikeResult(ok=True, status_code=200, message="ok"),
     )
     monkeypatch.setattr(
-        server_module, "save_tweet",
+        "xlikes_viewer.routers.timeline.save_tweet",
         lambda *_a, **_kw: save_module.SaveResult(ok=True, return_code=0, message="ok"),
     )
     app = create_app(library_root=fake_library, scan_in_background=False)

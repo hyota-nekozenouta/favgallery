@@ -10,13 +10,14 @@ from pathlib import Path
 from time import time
 from typing import TYPE_CHECKING, Any
 
+from xlikes_viewer.keys import iter_media_keys
+
 if TYPE_CHECKING:
     from xlikes_viewer.db import Database
     from xlikes_viewer.r2 import R2Client
 
 LOG_RING_SIZE = 200
 _MY_USERNAME_KEY = "my_username"
-_MEDIA_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".mp4", ".mov", ".webm", ".webp"}
 
 
 @dataclass
@@ -121,8 +122,8 @@ class SyncRunner:
         After upload, deletes successfully uploaded AND already-in-R2 files to
         free Railway volume space.
         """
-        assert self._r2_client is not None  # noqa: S101 — caller guarantee
-        assert self._library_root is not None  # noqa: S101 — caller guarantee
+        assert self._r2_client is not None
+        assert self._library_root is not None
         library = self._library_root
 
         # Fetch the full R2 key set once (paginated list) instead of per-file HEAD
@@ -133,16 +134,7 @@ class SyncRunner:
 
         uploaded_paths: list[Path] = []
         already_in_r2: list[Path] = []
-        for media_path in library.rglob("*"):
-            if not media_path.is_file():
-                continue
-            rel = media_path.relative_to(library)
-            if media_path.suffix.lower() not in _MEDIA_EXTENSIONS:
-                continue
-            # Skip thumbnails stored under any thumbs/ subdirectory.
-            if "thumbs" in rel.parts[:-1]:
-                continue
-            key = rel.as_posix()
+        for media_path, key in iter_media_keys(library):
             if key in r2_keys:
                 # Already in R2 — mark for local deletion to free Railway volume space.
                 already_in_r2.append(media_path)
@@ -188,15 +180,7 @@ class SyncRunner:
         deleted = 0
         checked = 0
         errors = 0
-        for media_path in library.rglob("*"):
-            if not media_path.is_file():
-                continue
-            rel = media_path.relative_to(library)
-            if media_path.suffix.lower() not in _MEDIA_EXTENSIONS:
-                continue
-            if "thumbs" in rel.parts[:-1]:
-                continue
-            key = rel.as_posix()
+        for media_path, key in iter_media_keys(library):
             checked += 1
             if key not in r2_keys:
                 continue
@@ -213,7 +197,6 @@ class SyncRunner:
         Runs in a parallel thread during gallery-dl download so that disk
         usage stays bounded. Checks every 5 seconds for new media files.
         """
-        import time as _time
 
         if self._r2_client is None or self._library_root is None:
             return
@@ -225,17 +208,9 @@ class SyncRunner:
                 break
             try:
                 uploaded = 0
-                for media_path in library.rglob("*"):
+                for media_path, key in iter_media_keys(library):
                     if stop.is_set():
                         break
-                    if not media_path.is_file():
-                        continue
-                    if media_path.suffix.lower() not in _MEDIA_EXTENSIONS:
-                        continue
-                    rel = media_path.relative_to(library)
-                    if "thumbs" in rel.parts[:-1]:
-                        continue
-                    key = rel.as_posix()
                     try:
                         self._r2_client.upload_file(media_path, key)
                         media_path.unlink()
@@ -297,7 +272,9 @@ class SyncRunner:
                 try:
                     self._on_complete()
                 except Exception:
-                    logging.getLogger(__name__).warning("on_complete callback failed", exc_info=True)
+                    logging.getLogger(__name__).warning(
+                        "on_complete callback failed", exc_info=True
+                    )
         except Exception as exc:
             err = f"{type(exc).__name__}: {exc}"
             rc = -1
