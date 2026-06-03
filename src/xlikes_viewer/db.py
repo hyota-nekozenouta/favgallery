@@ -646,6 +646,18 @@ class Database:
             (n,) = self._conn.execute("SELECT COUNT(*) FROM posts").fetchone()
         return int(n)
 
+    def all_post_keys(self) -> set[tuple[str, int]]:
+        """Return the set of ``(tweet_id, num)`` keys already in the index.
+
+        A cheap membership source for incremental ingest: the sidecar walk can
+        skip posts already present without reading or upserting every file.
+        Only two columns are fetched, so this stays fast even for large
+        libraries (where a full re-ingest was the post-sync bottleneck).
+        """
+        with self._lock:
+            rows = self._conn.execute("SELECT tweet_id, num FROM posts").fetchall()
+        return {(str(tweet_id), int(num)) for tweet_id, num in rows}
+
     def delete_post(self, tweet_id: str, num: int) -> bool:
         """Remove a single post row. Returns True if a row was deleted.
 

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
-from xlikes_viewer.scanner import scan_library
+from xlikes_viewer.db import Database
+from xlikes_viewer.scanner import ingest_to_db, scan_library
 from xlikes_viewer.x_helpers import extract_hashtags
 
 
@@ -84,3 +86,68 @@ def testextract_hashtags_handles_japanese() -> None:
     tags = extract_hashtags("#日本語 hello #英語")
     assert "日本語" in tags
     assert "英語" in tags
+
+
+# --- ingest_to_db: incremental ingest ------------------------------------
+
+
+@pytest.mark.unit
+def test_ingest_inserts_all_on_empty_db(fake_library: Path, tmp_path: Path) -> None:
+    db = Database(tmp_path / "x.sqlite")
+    n = ingest_to_db(fake_library, db)
+    assert n == 4
+    assert db.posts_count() == 4
+
+
+@pytest.mark.unit
+def test_ingest_skips_already_ingested(
+    fake_library: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second ingest of an unchanged library must re-process nothing.
+
+    Regression for the post-sync slowdown: ingest_to_db used to re-upsert every
+    sidecar on every sync (O(library size) -> ~9 min at 12k posts). It must now
+    skip posts already in the DB without upserting them.
+    """
+    db = Database(tmp_path / "x.sqlite")
+    assert ingest_to_db(fake_library, db) == 4
+
+    calls = {"n": 0}
+    real_upsert = db.upsert_post
+
+    def spy(**kw: object) -> None:
+        calls["n"] += 1
+        return real_upsert(**kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(db, "upsert_post", spy)
+    assert ingest_to_db(fake_library, db) == 0  # nothing new
+    assert calls["n"] == 0  # and no redundant upserts
+    assert db.posts_count() == 4
+
+
+@pytest.mark.unit
+def test_ingest_picks_up_only_new_sidecar(fake_library: Path, tmp_path: Path) -> None:
+    db = Database(tmp_path / "x.sqlite")
+    ingest_to_db(fake_library, db)
+
+    new_dir = fake_library / "dave"
+    new_dir.mkdir(parents=True, exist_ok=True)
+    (new_dir / "4001_1.jpg.json").write_text(
+        json.dumps(
+            {
+                "extension": "jpg",
+                "type": "photo",
+                "tweet_id": 4001,
+                "num": 1,
+                "date": "2026-01-01 00:00:00",
+                "author": {"name": "dave", "nick": "Dave"},
+                "content": "brand new like",
+                "favorite_count": 1,
+                "view_count": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert ingest_to_db(fake_library, db) == 1  # only the new one
+    assert db.posts_count() == 5

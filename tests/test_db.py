@@ -39,6 +39,39 @@ def test_create_list_rejects_blank(db: Database) -> None:
         db.create_list("   ")
 
 
+def _upsert(db: Database, tweet_id: str, num: int) -> None:
+    db.upsert_post(
+        tweet_id=tweet_id,
+        num=num,
+        rel_media=f"a/{tweet_id}_{num}.jpg",
+        media_type="photo",
+        extension="jpg",
+        width=1,
+        height=1,
+        date="2026-01-01 00:00:00",
+        author_name="a",
+        author_nick="",
+        content="",
+        favorite_count=0,
+        view_count=0,
+        sensitive=False,
+        lang="ja",
+        hashtags=(),
+    )
+
+
+@pytest.mark.unit
+def test_all_post_keys_returns_inserted_keys(db: Database) -> None:
+    _upsert(db, "1001", 1)
+    _upsert(db, "1001", 2)
+    assert db.all_post_keys() == {("1001", 1), ("1001", 2)}
+
+
+@pytest.mark.unit
+def test_all_post_keys_empty_when_no_posts(db: Database) -> None:
+    assert db.all_post_keys() == set()
+
+
 @pytest.mark.unit
 def test_create_list_unique_constraint(db: Database) -> None:
     import sqlite3
