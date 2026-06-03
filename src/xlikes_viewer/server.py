@@ -34,6 +34,8 @@ from xlikes_viewer.paths import portable_root
 from xlikes_viewer.payloads import _post_payload, _timeline_payload
 from xlikes_viewer.proxy import CdnProxy, is_allowed
 from xlikes_viewer.r2 import R2Client, r2_config_from_env
+from xlikes_viewer.routers import admin as admin_router
+from xlikes_viewer.routers import dedup as dedup_router
 from xlikes_viewer.routers import sync as sync_router
 from xlikes_viewer.save_one import save_tweet
 from xlikes_viewer.scanner import (
@@ -682,95 +684,6 @@ def create_app(
 
     # --- Admin --------------------------------------------------------
 
-    @app.post("/api/admin/cleanup-local")
-    def admin_cleanup_local() -> JSONResponse:
-        """Delete local media files that are already present in R2.
-
-        Protected by the existing Basic auth middleware (ARCHIVE_USER / ARCHIVE_PASSWORD).
-        Safe to call after a sync completes or any time R2 is populated.
-        Returns ``{"deleted": n, "checked": n, "errors": n}``.
-        """
-        if r2_client is None:
-            raise HTTPException(status_code=503, detail="R2 not configured")
-        result = sync_runner.cleanup_local()
-        return JSONResponse(result)
-
-    @app.get("/api/admin/storage-status")
-    def admin_storage_status() -> JSONResponse:
-        """Return local library file count/size and R2 config status.
-
-        Useful for confirming that local files have been cleaned up after R2 upload.
-        """
-        media_files = [
-            f for f in library_root.rglob("*")
-            if f.is_file() and not f.name.startswith(".")
-        ] if library_root.exists() else []
-        total_bytes = sum(f.stat().st_size for f in media_files)
-        return JSONResponse({
-            "r2_configured": r2_client is not None,
-            "local_file_count": len(media_files),
-            "local_size_bytes": total_bytes,
-            "local_size_mb": round(total_bytes / 1024 / 1024, 1),
-        })
-
-    @app.post("/api/admin/reset-archive-db")
-    def admin_reset_archive_db() -> JSONResponse:
-        """Delete gallery-dl's archive.sqlite so the next sync re-downloads everything.
-
-        Protected by the existing Basic auth middleware.
-        """
-        archive_db = library_root / "archive.sqlite"
-        if archive_db.exists():
-            archive_db.unlink()
-            return JSONResponse({"deleted": True, "path": str(archive_db)})
-        return JSONResponse({"deleted": False, "path": str(archive_db)})
-
-    # --- Dedup --------------------------------------------------------
-
-    @app.post("/api/dedup/run")
-    def dedup_run() -> JSONResponse:
-        if not dedup_runner.start():
-            return JSONResponse({"started": False, "reason": "already running"}, status_code=409)
-        return JSONResponse({"started": True})
-
-    @app.get("/api/dedup/status")
-    def dedup_status() -> JSONResponse:
-        s = dedup_runner.state
-        return JSONResponse(
-            {
-                "running": s.running,
-                "started_at": s.started_at,
-                "finished_at": s.finished_at,
-                "files_total": s.files_total,
-                "files_hashed": s.files_hashed,
-                "duplicates_deleted": s.duplicates_deleted,
-                "bytes_freed": s.bytes_freed,
-                "last_error": s.last_error,
-                "lifetime_deleted": db.dedup_log_count(),
-            }
-        )
-
-    @app.post("/api/dedup/visual/run")
-    def visual_dedup_run() -> JSONResponse:
-        if not visual_dedup_runner.start():
-            return JSONResponse({"started": False, "reason": "already running"}, status_code=409)
-        return JSONResponse({"started": True})
-
-    @app.get("/api/dedup/visual/status")
-    def visual_dedup_status() -> JSONResponse:
-        s = visual_dedup_runner.state
-        return JSONResponse(
-            {
-                "running": s.running,
-                "started_at": s.started_at,
-                "finished_at": s.finished_at,
-                "files_total": s.files_total,
-                "files_indexed": s.files_indexed,
-                "duplicates_deleted": s.duplicates_deleted,
-                "bytes_freed": s.bytes_freed,
-                "last_error": s.last_error,
-            }
-        )
 
     # --- Media (likes archive) ----------------------------------------
 
@@ -1403,6 +1316,8 @@ def create_app(
     )
 
     app.include_router(sync_router.router)
+    app.include_router(admin_router.router)
+    app.include_router(dedup_router.router)
 
     return app
 
