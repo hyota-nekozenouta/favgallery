@@ -14,13 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from xlikes_viewer.scanner import Index, build_index_from_db, ingest_to_db
 
 if TYPE_CHECKING:
-    from fastapi import Request
-
     from xlikes_viewer.db import Database
     from xlikes_viewer.proxy import CdnProxy
     from xlikes_viewer.r2 import R2Client

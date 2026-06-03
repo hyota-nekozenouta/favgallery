@@ -34,6 +34,7 @@ from xlikes_viewer.paths import portable_root
 from xlikes_viewer.payloads import _post_payload, _timeline_payload
 from xlikes_viewer.proxy import CdnProxy, is_allowed
 from xlikes_viewer.r2 import R2Client, r2_config_from_env
+from xlikes_viewer.routers import sync as sync_router
 from xlikes_viewer.save_one import save_tweet
 from xlikes_viewer.scanner import (
     DEFAULT_LIBRARY,
@@ -678,40 +679,6 @@ def create_app(
         return StreamingResponse(body_iter, status_code=status, headers=headers)
 
     # --- Sync (xlikes downloader) -------------------------------------
-
-    @app.get("/api/sync/status")
-    def sync_status() -> JSONResponse:
-        s = sync_runner.state
-        return JSONResponse(
-            {
-                "running": s.running,
-                "started_at": s.started_at,
-                "finished_at": s.finished_at,
-                "return_code": s.last_return_code,
-                "error": s.last_error,
-                "exe_present": True,  # gallery-dl is always available
-                "log_tail": list(s.log_lines)[-40:],
-            }
-        )
-
-    @app.post("/api/sync/start")
-    def sync_start() -> JSONResponse:
-        if not cookies_file.exists():
-            return JSONResponse(
-                {"started": False, "reason": "cookies.txt not found — set GALLERY_DL_COOKIES env var"},
-                status_code=400,
-            )
-        ok = sync_runner.start()
-        if not ok:
-            return JSONResponse(
-                {"started": False, "reason": sync_runner.state.last_error or "already running"},
-                status_code=409,
-            )
-        return JSONResponse({"started": True})
-
-    @app.post("/api/sync/stop")
-    def sync_stop() -> JSONResponse:
-        return JSONResponse({"stopped": sync_runner.stop()})
 
     # --- Admin --------------------------------------------------------
 
@@ -1434,6 +1401,8 @@ def create_app(
         me_likes_lock=me_likes_lock,
         me_likes_state=me_likes_state,
     )
+
+    app.include_router(sync_router.router)
 
     return app
 
