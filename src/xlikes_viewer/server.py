@@ -3,32 +3,26 @@
 from __future__ import annotations
 
 import base64
-import json as _json
 import os
 import secrets
 import threading
-import time
 from pathlib import Path
-from urllib.parse import urlparse
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 
-from xlikes_viewer.book_dedup import (
-    BookIndexRunner,
-    find_duplicate_book,
-    fingerprint_for_ordered_files,
-)
+from xlikes_viewer.book_dedup import BookIndexRunner
+from xlikes_viewer.book_importer import BookImportQueue
 from xlikes_viewer.context import AppContext
 from xlikes_viewer.db import Database
 from xlikes_viewer.dedup import DedupRunner, VisualDedupRunner
-from xlikes_viewer.gallerydl_config import build_book_import_config, write_gallerydl_config
+from xlikes_viewer.gallerydl_config import write_gallerydl_config
 from xlikes_viewer.paths import portable_root
 from xlikes_viewer.proxy import CdnProxy
 from xlikes_viewer.r2 import R2Client, r2_config_from_env
 from xlikes_viewer.routers import admin as admin_router
+from xlikes_viewer.routers import books as books_router
 from xlikes_viewer.routers import dedup as dedup_router
 from xlikes_viewer.routers import lists as lists_router
 from xlikes_viewer.routers import me as me_router
@@ -46,27 +40,6 @@ from xlikes_viewer.sync import SyncRunner
 from xlikes_viewer.timeline import (
     TimelineRefresher,
 )
-
-
-class _LikeAndSaveBody(BaseModel):
-    tweet_id: str
-    author_name: str
-
-
-class _LastSeenBody(BaseModel):
-    tweet_id: str
-
-
-class _MeBody(BaseModel):
-    username: str
-
-
-class _BookImportBody(BaseModel):
-    url: str
-
-
-_LAST_SEEN_KEY = "last_seen_timeline_tweet_id"
-_MY_USERNAME_KEY = "my_username"
 
 
 def _write_cookies_from_env(cookies_path: Path) -> None:
@@ -186,10 +159,6 @@ def create_app(
 
     static_dir = Path(__file__).resolve().parent / "static"
 
-    def _index() -> Index:
-        with state_lock:
-            return state["index"]  # type: ignore[return-value]
-
     def _refresh_index() -> Index:
         # Ingest any new local JSON sidecars into DB, then rebuild from DB.
         ingest_to_db(library_root, db)
@@ -267,514 +236,17 @@ def create_app(
     }
     me_likes_lock = threading.Lock()
 
-    # --- Books (bookshelf) ------------------------------------------------
-
-    _BOOKS_DIR = "_books"
-
-    @app.get("/api/books")
-    def api_books() -> JSONResponse:
-        items = db.books()
-        fav_ids = db.book_favorite_ids()
-        all_tags = {bid: [] for bid in [b.id for b in items]}
-        for b in items:
-            all_tags[b.id] = db.book_tags(b.id)
-        return JSONResponse([
-            {"id": b.id, "title": b.title, "cover_path": b.cover_path,
-             "page_count": b.page_count, "created_at": b.created_at,
-             "is_favorite": b.id in fav_ids, "tags": all_tags[b.id]}
-            for b in items
-        ])
-
-    @app.get("/api/books/{book_id}")
-    def api_book_detail(book_id: int) -> JSONResponse:
-        book = db.get_book(book_id)
-        if book is None:
-            raise HTTPException(status_code=404, detail="book not found")
-        pages = db.book_pages(book_id)
-        return JSONResponse({
-            "id": book.id, "title": book.title, "cover_path": book.cover_path,
-            "page_count": book.page_count, "created_at": book.created_at,
-            "pages": [{"page_num": p.page_num, "rel_path": p.rel_path,
-                       "width": p.width, "height": p.height} for p in pages],
-        })
-
-    @app.post("/api/books")
-    async def api_create_book(
-        title: str = Form(...),
-        files: list[UploadFile] = File(...),
-    ) -> JSONResponse:
-        if not files:
-            raise HTTPException(status_code=400, detail="no files provided")
-
-        # Sort files by filename for natural page order
-        import re
-        def _natural_key(name: str) -> list:
-            return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', name)]
-
-        sorted_files = sorted(files, key=lambda f: _natural_key(f.filename or ""))
-
-        # Create book record first to get ID
-        book = db.create_book(title=title, cover_path=None, page_count=len(sorted_files))
-
-        # Save files to disk
-        book_dir = library_root / _BOOKS_DIR / str(book.id)
-        book_dir.mkdir(parents=True, exist_ok=True)
-
-        pages: list[tuple[int, str, int | None, int | None]] = []
-        cover_rel: str | None = None
-
-        for i, f in enumerate(sorted_files, start=1):
-            ext = Path(f.filename or "page.jpg").suffix.lower() or ".jpg"
-            filename = f"{i:04d}{ext}"
-            dest = book_dir / filename
-            content = await f.read()
-            dest.write_bytes(content)
-
-            rel = f"{_BOOKS_DIR}/{book.id}/{filename}"
-            if i == 1:
-                cover_rel = rel
-
-            # Try to get dimensions
-            w, h = None, None
-            try:
-                import io
-
-                from PIL import Image
-                img = Image.open(io.BytesIO(content))
-                w, h = img.size
-            except Exception:
-                pass
-
-            pages.append((i, rel, w, h))
-
-        db.add_book_pages(book.id, pages)
-
-        # Update cover path
-        if cover_rel:
-            with db._lock:
-                db._conn.execute("UPDATE books SET cover_path = ? WHERE id = ?", (cover_rel, book.id))
-
-        # Duplicate check (files are still on local disk, nothing uploaded yet).
-        import shutil
-        ordered_files = [library_root / rel for (_pn, rel, _w, _h) in pages]
-        page_count, cover_phash, samples = fingerprint_for_ordered_files(ordered_files)
-        dup = find_duplicate_book(db, page_count, cover_phash, samples)
-        if dup is not None:
-            # Roll back the just-created book + its files; report the match.
-            db.delete_book(book.id)  # cascades book_pages/tags/favorites/hashes
-            shutil.rmtree(book_dir, ignore_errors=True)
-            return JSONResponse(
-                {"skipped": True, "matched_book_id": dup[0], "matched_title": dup[1]},
-                status_code=200,
-            )
-        # Not a duplicate: persist its fingerprint so future imports can match it.
-        db.upsert_book_hash(
-            book_id=book.id,
-            page_count=page_count,
-            cover_phash=cover_phash,
-            sample_phashes=samples,
-            indexed_at=int(time.time()),
-        )
-
-        # Upload to R2 if configured, then delete local copies
-        if r2_client is not None:
-            for i, f in enumerate(sorted_files, start=1):
-                ext = Path(f.filename or "page.jpg").suffix.lower() or ".jpg"
-                filename = f"{i:04d}{ext}"
-                local_path = book_dir / filename
-                key = f"{_BOOKS_DIR}/{book.id}/{filename}"
-                try:
-                    r2_client.upload_file(local_path, key)
-                    local_path.unlink()
-                except Exception:
-                    pass  # Keep local if R2 fails
-            # Remove empty directory
-            if book_dir.exists() and not any(book_dir.iterdir()):
-                book_dir.rmdir()
-
-        return JSONResponse({"id": book.id, "title": book.title, "page_count": len(pages)}, status_code=201)
-
-    @app.delete("/api/books/{book_id}")
-    def api_delete_book(book_id: int) -> JSONResponse:
-        # Delete files from disk
-        book_dir = library_root / _BOOKS_DIR / str(book_id)
-        if book_dir.exists():
-            import shutil
-            shutil.rmtree(book_dir, ignore_errors=True)
-        deleted = db.delete_book(book_id)
-        if not deleted:
-            raise HTTPException(status_code=404, detail="book not found")
-        return JSONResponse({"deleted": True})
-
-    class _BookPatchBody(BaseModel):
-        title: str | None = None
-
-    @app.patch("/api/books/{book_id}")
-    def api_patch_book(book_id: int, body: _BookPatchBody) -> JSONResponse:
-        if body.title is not None:
-            if not db.update_book_title(book_id, body.title.strip()):
-                raise HTTPException(status_code=404, detail="book not found")
-        book = db.get_book(book_id)
-        return JSONResponse({"id": book.id, "title": book.title, "page_count": book.page_count})
-
-    # --- Book Tags & Favorites ---
-
-    @app.get("/api/books/tags")
-    def api_book_tags() -> JSONResponse:
-        tags = db.all_book_tags()
-        return JSONResponse({"tags": [{"name": t[0], "count": t[1]} for t in tags]})
-
-    class _BookTagsBody(BaseModel):
-        tags: list[str]
-
-    @app.put("/api/books/{book_id}/tags")
-    def api_set_book_tags(book_id: int, body: _BookTagsBody) -> JSONResponse:
-        if db.get_book(book_id) is None:
-            raise HTTPException(status_code=404, detail="book not found")
-        db.set_book_tags(book_id, body.tags)
-        return JSONResponse({"ok": True})
-
-    @app.post("/api/books/{book_id}/favorite")
-    def api_toggle_book_favorite(book_id: int) -> JSONResponse:
-        if db.get_book(book_id) is None:
-            raise HTTPException(status_code=404, detail="book not found")
-        new_state = db.toggle_book_favorite(book_id)
-        return JSONResponse({"favorite": new_state})
-
-    # --- Book Import (URL → gallery-dl → bookshelf) -----------------------
-
-    import_queue: list[dict] = []  # [{id, url, status, error, book_id, title, progress}]
-    import_queue_lock = threading.Lock()
-    _import_id_counter = [0]
-
-    def _process_next_in_queue() -> None:
-        """Start the next pending item in the queue, if any."""
-        with import_queue_lock:
-            pending = [item for item in import_queue if item["status"] == "pending"]
-            if not pending:
-                return
-            item = pending[0]
-            item["status"] = "running"
-            item["progress"] = "開始中..."
-        threading.Thread(
-            target=_import_worker, args=(item,), daemon=True
-        ).start()
-
-    # --- Site-specific scrapers ---
-
-    def _scrape_doujin_freee(url: str, tmp_dir: Path) -> list[Path]:
-        """doujin-freee.cc 専用: img_gage スライダーから全画像URLを生成して取得"""
-        import requests as _requests
-        from bs4 import BeautifulSoup
-
-        _headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-
-        resp = _requests.get(url, timeout=30, headers=_headers)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        # img_gage から画像生成パラメータを抽出
-        gage = soup.select_one(".img_gage, [class*=img_gage]")
-        if not gage:
-            return []
-
-        max_el = gage.select_one("input[type='range']")
-        img_b_el = gage.select_one("#img_b")
-        img_s_el = gage.select_one("#img_s")
-        year_el = gage.select_one("#post_year")
-        month_el = gage.select_one("#post_month")
-
-        if not all([max_el, img_b_el, img_s_el, year_el, month_el]):
-            return []
-
-        max_pages = int(max_el.get("max", "1"))
-        img_b = img_b_el.get("value", "")
-        img_s = img_s_el.get("value", "")
-        post_year = year_el.get("value", "")
-        post_month = month_el.get("value", "")
-
-        # URL パターン: https://img.doujin-freee.cc/thumb640/{year}{month}/{img_b}{img_s}/{img_s}-{page:03d}-640.jpg
-        img_urls = [
-            f"https://img.doujin-freee.cc/thumb640/{post_year}{post_month}/{img_b}{img_s}/{img_s}-{i:03d}-640.jpg"
-            for i in range(1, max_pages + 1)
-        ]
-
-        # ダウンロード
-        files: list[Path] = []
-        for i, img_url in enumerate(img_urls, 1):
-            try:
-                r = _requests.get(img_url, timeout=30, headers={
-                    **_headers, "Referer": url,
-                })
-                if r.status_code != 200:
-                    continue
-                dest = tmp_dir / f"{i:04d}.jpg"
-                dest.write_bytes(r.content)
-                files.append(dest)
-            except Exception:
-                continue
-        return files
-
-    def _scrape_images_from_html(url: str, tmp_dir: Path) -> list[Path]:
-        """サイトに応じたスクレイパーを選択して実行"""
-        host = urlparse(url).netloc.lower()
-
-        # サイト別ルーティング
-        if "doujin-freee" in host:
-            return _scrape_doujin_freee(url, tmp_dir)
-
-        # 未対応サイト: 汎用フォールバック（1ページ目のみ）
-        from urllib.parse import urljoin
-
-        import requests as _requests
-        from bs4 import BeautifulSoup
-
-        _headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        resp = _requests.get(url, timeout=30, headers=_headers)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        imgs = soup.select("article img, .entry-content img, .post-content img")
-        img_urls = []
-        for img in imgs:
-            src = img.get("data-src") or img.get("data-lazy-src") or img.get("src")
-            if src and not src.split("?")[0].endswith((".svg", ".gif", ".ico")):
-                if not src.startswith("http"):
-                    src = urljoin(url, src)
-                img_urls.append(src)
-
-        seen: set[str] = set()
-        files: list[Path] = []
-        for i, img_url in enumerate(img_urls, 1):
-            if img_url in seen:
-                continue
-            seen.add(img_url)
-            try:
-                r = _requests.get(img_url, timeout=30, headers={**_headers, "Referer": url})
-                if r.status_code != 200:
-                    continue
-                ext = Path(img_url.split("?")[0]).suffix.lower() or ".jpg"
-                if ext not in {".jpg", ".jpeg", ".png", ".webp", ".avif", ".bmp"}:
-                    ext = ".jpg"
-                dest = tmp_dir / f"{i:04d}{ext}"
-                dest.write_bytes(r.content)
-                files.append(dest)
-            except Exception:
-                continue
-        return files
-
-    def _import_worker(item: dict) -> None:
-        import re
-        import subprocess
-        import tempfile
-
-        url = item["url"]
-        tmp_dir = None
-        try:
-            tmp_dir = tempfile.mkdtemp(prefix="book_import_")
-            tmp_path = Path(tmp_dir)
-
-            # Try gallery-dl first
-            gdl_failed = False
-            cfg = build_book_import_config(tmp_dir)
-            cfg_path = Path(tmp_dir) / "gdl_config.json"
-            cfg_path.write_text(_json.dumps(cfg), encoding="utf-8")
-
-            cmd = ["gallery-dl", "--config", str(cfg_path), url]
-            with import_queue_lock:
-                item["progress"] = "ダウンロード中..."
-
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-                if result.returncode != 0:
-                    gdl_failed = True
-            except (subprocess.TimeoutExpired, FileNotFoundError):
-                gdl_failed = True
-
-            image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".bmp"}
-            all_files: list[Path] = []
-            for f in sorted(tmp_path.rglob("*")):
-                if f.is_file() and f.suffix.lower() in image_exts:
-                    all_files.append(f)
-
-            # Fallback: HTML scraping if gallery-dl failed or found no images
-            if not all_files and (gdl_failed or True):
-                with import_queue_lock:
-                    item["progress"] = "HTML から画像を取得中..."
-                try:
-                    all_files = _scrape_images_from_html(url, tmp_path)
-                except Exception:
-                    pass  # fall through to empty check below
-
-            if not all_files:
-                with import_queue_lock:
-                    item["error"] = "画像が見つかりませんでした"
-                    item["status"] = "error"
-                return
-
-            # Extract title
-            title = "Imported"
-            for f in tmp_path.rglob("*.json"):
-                try:
-                    meta = _json.loads(f.read_text(encoding="utf-8"))
-                    if isinstance(meta, dict):
-                        title = meta.get("gallery", {}).get("title", "") or meta.get("title", "") or title
-                        if title != "Imported":
-                            break
-                except Exception:
-                    pass
-
-            if title == "Imported":
-                from urllib.parse import unquote
-                parts = unquote(url).rsplit("/", 1)[-1].rsplit(".", 1)[0]
-                title = re.sub(r'-\d+$', '', parts).replace('-', ' ').strip() or "Imported"
-
-            with import_queue_lock:
-                item["title"] = title
-                item["progress"] = "本棚に登録中..."
-
-            def _natural_key(name: str) -> list:
-                return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', name)]
-
-            all_files.sort(key=lambda f: _natural_key(f.name))
-
-            # Skip if this import duplicates a book already on the shelf. The tmp
-            # files still exist here (before create + R2 upload), so we can
-            # fingerprint and bail out cleanly without touching the library.
-            _pc, _cover_phash, _samples = fingerprint_for_ordered_files(all_files)
-            _dup = find_duplicate_book(db, _pc, _cover_phash, _samples)
-            if _dup is not None:
-                with import_queue_lock:
-                    item["status"] = "skipped"
-                    item["matched_book_id"] = _dup[0]
-                    item["matched_title"] = _dup[1]
-                    item["progress"] = "重複のためスキップ"
-                return  # finally clause cleans tmp_dir + advances the queue
-
-            book = db.create_book(title=title, cover_path=None, page_count=len(all_files))
-            book_dir = library_root / _BOOKS_DIR / str(book.id)
-            book_dir.mkdir(parents=True, exist_ok=True)
-
-            pages: list[tuple[int, str, int | None, int | None]] = []
-            cover_rel: str | None = None
-
-            for i, src_file in enumerate(all_files, start=1):
-                ext = src_file.suffix.lower() or ".jpg"
-                filename = f"{i:04d}{ext}"
-                dest = book_dir / filename
-                import shutil
-                shutil.copy2(src_file, dest)
-
-                rel = f"{_BOOKS_DIR}/{book.id}/{filename}"
-                if i == 1:
-                    cover_rel = rel
-
-                w, h = None, None
-                try:
-                    from PIL import Image
-                    img = Image.open(dest)
-                    w, h = img.size
-                    img.close()
-                except Exception:
-                    pass
-
-                pages.append((i, rel, w, h))
-
-            db.add_book_pages(book.id, pages)
-
-            if cover_rel:
-                with db._lock:
-                    db._conn.execute(
-                        "UPDATE books SET cover_path = ? WHERE id = ?", (cover_rel, book.id)
-                    )
-
-            # Persist the fingerprint (computed above from tmp files) so future
-            # imports can detect duplicates of this book.
-            db.upsert_book_hash(
-                book_id=book.id,
-                page_count=_pc,
-                cover_phash=_cover_phash,
-                sample_phashes=_samples,
-                indexed_at=int(time.time()),
-            )
-
-            # Upload to R2 if configured
-            if r2_client is not None:
-                for _page_num, rel, _w, _h in pages:
-                    local_path = library_root / rel
-                    if local_path.is_file():
-                        try:
-                            r2_client.upload_file(local_path, rel)
-                            local_path.unlink()
-                        except Exception:
-                            pass
-                if book_dir.exists() and not any(book_dir.iterdir()):
-                    book_dir.rmdir()
-
-            with import_queue_lock:
-                item["book_id"] = book.id
-                item["status"] = "done"
-                item["progress"] = "完了"
-
-        except Exception as exc:
-            with import_queue_lock:
-                item["error"] = f"{type(exc).__name__}: {exc}"
-                item["status"] = "error"
-        finally:
-            if tmp_dir:
-                import shutil
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-            _process_next_in_queue()
-
-    @app.post("/api/books/import")
-    def api_import_book(body: _BookImportBody) -> JSONResponse:
-        if not body.url.strip():
-            raise HTTPException(status_code=400, detail="URL is required")
-        with import_queue_lock:
-            _import_id_counter[0] += 1
-            item = {
-                "id": _import_id_counter[0],
-                "url": body.url.strip(),
-                "status": "pending",
-                "error": None,
-                "book_id": None,
-                "title": "",
-                "progress": "待機中...",
-                "matched_book_id": None,
-                "matched_title": "",
-            }
-            import_queue.append(item)
-            # Start processing if nothing is currently running
-            running = any(i["status"] == "running" for i in import_queue)
-        if not running:
-            _process_next_in_queue()
-        return JSONResponse({"started": True, "id": item["id"]})
-
-    @app.get("/api/books/import/status")
-    def api_import_status() -> JSONResponse:
-        with import_queue_lock:
-            return JSONResponse({"queue": list(import_queue)})
-
-    @app.get("/api/books/index/status")
-    def api_book_index_status() -> JSONResponse:
-        s = book_index_runner.state
-        return JSONResponse(
-            {
-                "running": s.running,
-                "books_total": s.books_total,
-                "books_indexed": s.books_indexed,
-                "last_error": s.last_error,
-            }
-        )
+    # --- Books (bookshelf) — handlers live in routers/books.py -------------
+    books_dir = "_books"
+    book_import_queue = BookImportQueue(
+        db=db,
+        library_root=library_root,
+        r2_client=r2_client,
+        books_dir=books_dir,
+    )
 
     # All shared state + collaborators are now constructed; gather them into the
     # AppContext that the extracted routers reach via Depends(get_context).
-    # (Inline handlers above still close over the locals; they migrate to
-    # routers/ group by group, each switching to ctx.)
     app.state.context = AppContext(
         library_root=library_root,
         library_root_resolved=library_root_resolved,
@@ -782,7 +254,7 @@ def create_app(
         gallerydl_config_path=gallerydl_config_path,
         fav_authors_path=_fav_authors_path,
         static_dir=static_dir,
-        books_dir=_BOOKS_DIR,
+        books_dir=books_dir,
         db=db,
         r2_client=r2_client,
         cdn_proxy=cdn_proxy,
@@ -796,6 +268,7 @@ def create_app(
         gdl_lock=unliked_lock,
         me_likes_lock=me_likes_lock,
         me_likes_state=me_likes_state,
+        book_import_queue=book_import_queue,
     )
 
     app.include_router(sync_router.router)
@@ -806,6 +279,7 @@ def create_app(
     app.include_router(media_router.router)
     app.include_router(timeline_router.router)
     app.include_router(me_router.router)
+    app.include_router(books_router.router)
 
     return app
 
