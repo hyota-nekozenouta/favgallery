@@ -72,6 +72,14 @@ class R2Client:
         """Upload ``local_path`` to R2 under ``key``."""
         self._client.upload_file(str(local_path), self._bucket, key)
 
+    def delete_object(self, key: str) -> None:
+        """Delete the object stored under ``key``.
+
+        Idempotent: S3/R2 ``delete_object`` does not error when the key is
+        already absent, so callers can use this freely to purge orphaned media.
+        """
+        self._client.delete_object(Bucket=self._bucket, Key=key)
+
     def object_exists(self, key: str) -> bool:
         """Return True if an object with ``key`` exists in the bucket."""
         try:

@@ -283,6 +283,7 @@ def create_app(
     library_root: Path = DEFAULT_LIBRARY,
     *,
     scan_in_background: bool = True,
+    r2_client: R2Client | None = None,
 ) -> FastAPI:
     app = FastAPI(title="Archive", version="0.2.0")
     app.middleware("http")(_make_basic_auth_middleware())
@@ -301,8 +302,11 @@ def create_app(
     cookies_file = library_root.parent / "cookies.txt"  # data/cookies.txt
     _write_cookies_from_env(cookies_file)
 
-    r2_cfg = r2_config_from_env()
-    r2_client: R2Client | None = R2Client(r2_cfg) if r2_cfg is not None else None
+    # Allow tests / callers to inject an R2 client; otherwise build from env.
+    # Production behaviour is unchanged (no injection -> env-derived client).
+    if r2_client is None:
+        r2_cfg = r2_config_from_env()
+        r2_client = R2Client(r2_cfg) if r2_cfg is not None else None
     app.state.r2_client = r2_client
     cdn_proxy = CdnProxy(cookies_file)
     gallerydl_config_path = (
@@ -536,6 +540,19 @@ def create_app(
             media.unlink()
         with contextlib.suppress(FileNotFoundError):
             sidecar.unlink()
+
+        # In R2-backed deployments the media lives in R2 (the local copy is
+        # deleted after upload), so unlink() above is a no-op there. Purge the
+        # R2 object too — otherwise every delete leaks an orphaned media file in
+        # the bucket. The object key is the library-relative posix path (== how
+        # the sync/upload path derives keys). A failure here must NOT fail the
+        # user's delete: the DB row + local files are already gone, so the post
+        # has left the index regardless; an orphan is recoverable later.
+        if r2_client is not None:
+            try:
+                r2_client.delete_object(rel)
+            except Exception as exc:  # degrade gracefully like other R2 calls
+                print(f"[r2] delete_object failed for {rel}: {exc}")
 
         # Drop the DB row so the post leaves the index for good — otherwise a
         # later sidecar re-ingest (_refresh_index) resurrects it. Lists + hash
