@@ -36,6 +36,7 @@ from xlikes_viewer.proxy import CdnProxy, is_allowed
 from xlikes_viewer.r2 import R2Client, r2_config_from_env
 from xlikes_viewer.routers import admin as admin_router
 from xlikes_viewer.routers import dedup as dedup_router
+from xlikes_viewer.routers import lists as lists_router
 from xlikes_viewer.routers import sync as sync_router
 from xlikes_viewer.save_one import save_tweet
 from xlikes_viewer.scanner import (
@@ -53,17 +54,8 @@ from xlikes_viewer.timeline import (
 )
 
 
-class _ListCreateBody(BaseModel):
-    name: str
-
-
 class _FavAuthorsBody(BaseModel):
     authors: list[str]
-
-
-class _ListItemBody(BaseModel):
-    tweet_id: str
-    num: int
 
 
 class _LikeAndSaveBody(BaseModel):
@@ -451,50 +443,6 @@ def create_app(
         db.set_favorite_authors(body.authors)
         return JSONResponse({"saved": True})
 
-    @app.get("/api/lists")
-    def lists_index() -> JSONResponse:
-        return JSONResponse(
-            [
-                {"id": x.id, "name": x.name, "count": x.item_count, "created_at": x.created_at}
-                for x in db.lists()
-            ]
-        )
-
-    @app.post("/api/lists")
-    def lists_create(body: _ListCreateBody) -> JSONResponse:
-        name = body.name.strip()
-        if not name:
-            raise HTTPException(status_code=400, detail="name required")
-        try:
-            row = db.create_list(name)
-        except Exception as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return JSONResponse(
-            {"id": row.id, "name": row.name, "count": 0, "created_at": row.created_at}
-        )
-
-    @app.delete("/api/lists/{list_id}")
-    def lists_delete(list_id: int) -> JSONResponse:
-        ok = db.delete_list(list_id)
-        if not ok:
-            raise HTTPException(status_code=404, detail="not found")
-        return JSONResponse({"deleted": True})
-
-    @app.post("/api/lists/{list_id}/items")
-    def lists_add_item(list_id: int, body: _ListItemBody) -> JSONResponse:
-        if not body.tweet_id or body.num <= 0:
-            raise HTTPException(status_code=400, detail="tweet_id and num required")
-        added = db.add_item(list_id, body.tweet_id, body.num)
-        return JSONResponse({"added": added})
-
-    @app.delete("/api/lists/{list_id}/items/{tweet_id}/{num}")
-    def lists_remove_item(list_id: int, tweet_id: str, num: int) -> JSONResponse:
-        removed = db.remove_item(list_id, tweet_id, num)
-        return JSONResponse({"removed": removed})
-
-    @app.get("/api/posts/lists")
-    def post_lists(tweet_id: str, num: int) -> JSONResponse:
-        return JSONResponse({"list_ids": db.lists_for_post(tweet_id, num)})
 
     # --- Timeline ------------------------------------------------------
 
@@ -1318,6 +1266,7 @@ def create_app(
     app.include_router(sync_router.router)
     app.include_router(admin_router.router)
     app.include_router(dedup_router.router)
+    app.include_router(lists_router.router)
 
     return app
 
