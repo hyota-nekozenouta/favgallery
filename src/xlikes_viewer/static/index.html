@@ -14,6 +14,9 @@
     @media (min-width: 1700px) { .masonry { column-count: 4; } }
     .tile { break-inside: avoid; margin-bottom: 12px; position: relative; }
     .tile img, .tile video { display: block; width: 100%; border-radius: 8px; transition: transform .25s ease; }
+    /* Reader slide track */
+    .reader-animating { transition: transform .22s cubic-bezier(.22,.61,.36,1); }
+    #readerTrack img { -webkit-user-drag: none; user-select: none; pointer-events: none; }
     .tile:hover img, .tile:hover video { transform: scale(1.02); }
     .tile .info {
       position: absolute; left: 0; right: 0; bottom: 0;
@@ -301,10 +304,17 @@
   </div>
 
   <!-- Book Reader Modal -->
-  <div id="readerModal" class="fixed inset-0 bg-black hidden items-center justify-center z-[60] select-none">
-    <div class="absolute top-4 right-6 text-zinc-400 hover:text-white text-3xl cursor-pointer z-10" onclick="closeReader()">×</div>
-    <div class="absolute top-4 left-1/2 -translate-x-1/2 text-zinc-400 text-sm z-10" id="readerPageNum">1 / 1</div>
-    <img id="readerImg" src="" alt="" class="max-w-full max-h-full object-contain cursor-pointer" />
+  <div id="readerModal" class="fixed inset-0 bg-black hidden items-center justify-center z-[60] select-none overflow-hidden">
+    <div class="absolute top-4 right-6 text-zinc-400 hover:text-white text-3xl cursor-pointer z-20" onclick="closeReader()">×</div>
+    <div class="absolute top-4 left-1/2 -translate-x-1/2 text-zinc-400 text-sm z-20" id="readerPageNum">1 / 1</div>
+    <!-- 3-pane slide track. RTL (manga) layout left->right = [next, current, prev]. -->
+    <div id="readerViewport" class="absolute inset-0 overflow-hidden touch-none">
+      <div id="readerTrack" class="absolute inset-0 flex" style="will-change:transform">
+        <div class="reader-pane shrink-0 w-screen h-full flex items-center justify-center"><img data-slot="0" alt="" class="max-w-full max-h-full object-contain" /></div>
+        <div class="reader-pane shrink-0 w-screen h-full flex items-center justify-center"><img data-slot="1" alt="" class="max-w-full max-h-full object-contain" /></div>
+        <div class="reader-pane shrink-0 w-screen h-full flex items-center justify-center"><img data-slot="2" alt="" class="max-w-full max-h-full object-contain" /></div>
+      </div>
+    </div>
   </div>
 
   <!-- List popover (single shared instance) -->
@@ -361,6 +371,16 @@ const videoCapObserver = new IntersectionObserver((entries) => {
     _captureVideoFrame(img.dataset.videoSrc, img);
   });
 }, { rootMargin: '400px' });
+
+// --- Bookshelf cover lazy-load (start loading ~300px before viewport) ---
+const bookCoverObserver = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (!e.isIntersecting) return;
+    const img = e.target;
+    bookCoverObserver.unobserve(img);
+    if (img.dataset.cover) { img.src = img.dataset.cover; delete img.dataset.cover; }
+  });
+}, { rootMargin: '300px' });
 
 function _captureVideoFrame(src, imgEl) {
   const v = document.createElement('video');
@@ -1827,7 +1847,7 @@ function renderBooks() {
     const cover = b.cover_path ? `/thumb/${b.cover_path}?size=400` : '';
     const favClass = b.is_favorite ? 'text-yellow-400' : 'text-zinc-600 hover:text-yellow-400';
     return `<div class="tile cursor-pointer" data-book-id="${b.id}">
-      ${cover ? `<img src="${cover}" loading="lazy" alt="" />` : '<div class="bg-zinc-800 w-full" style="min-height:200px"></div>'}
+      ${cover ? `<img data-cover="${cover}" loading="lazy" alt="" />` : '<div class="bg-zinc-800 w-full" style="min-height:200px"></div>'}
       <button class="del-btn" data-del-book="${b.id}" title="削除">🗑</button>
       <button class="fav-btn ${favClass}" data-fav-book="${b.id}" title="お気に入り">♥</button>
       <div class="info" style="opacity:1;position:relative;padding:8px 10px;background:rgba(0,0,0,.7)">
@@ -1837,6 +1857,9 @@ function renderBooks() {
     </div>`;
   }).join('');
   m.innerHTML = addBtn + tiles;
+
+  // Lazy-load covers slightly before they enter the viewport.
+  m.querySelectorAll('img[data-cover]').forEach(img => bookCoverObserver.observe(img));
 
   // Add button click
   document.getElementById('bookAddTile')?.addEventListener('click', openBookUpload);
@@ -2018,7 +2041,12 @@ async function submitBook() {
   try {
     const r = await fetch('/api/books', { method: 'POST', body: form });
     if (!r.ok) { const e = await r.json(); alert(e.detail || 'エラー'); return; }
+    const data = await r.json().catch(() => ({}));
     document.getElementById('bookUploadModal')?.remove();
+    if (data.skipped) {
+      alert('既存の本と重複していたため追加しませんでした' + (data.matched_title ? '：' + data.matched_title : ''));
+      return;
+    }
     await fetchBooks();
   } catch (e) {
     alert('アップロード失敗: ' + e.message);
@@ -2080,6 +2108,7 @@ function renderImportQueue(queue) {
     let badge = '';
     if (item.status === 'running') badge = '<span class="text-indigo-400">⏳ ' + escapeHtml(item.progress || 'DL中') + '</span>';
     else if (item.status === 'done') badge = '<span class="text-green-400">✓ 完了</span>';
+    else if (item.status === 'skipped') badge = '<span class="text-amber-400">⊘ 重複スキップ' + (item.matched_title ? '（' + escapeHtml(item.matched_title) + '）' : '') + '</span>';
     else if (item.status === 'error') badge = '<span class="text-red-400">✗ ' + escapeHtml((item.error || '').slice(0, 30)) + '</span>';
     else badge = '<span class="text-zinc-500">待機中</span>';
 
@@ -2096,71 +2125,181 @@ state._importPoll = null;
 // --- Book Reader ---
 state.reader = { bookId: null, pages: [], pos: 0 };
 
+// Warm the browser cache for upcoming pages so navigation feels instant.
+// Pages are served with immutable cache headers, so a warmed image is reused on real nav.
+const _prefetchCache = new Set();
+function prefetchPageImages(startPos, count, direction) {
+  const { pages } = state.reader;
+  if (!pages || !pages.length) return;
+  const step = direction >= 0 ? 1 : -1;
+  const targets = [];
+  for (let k = 1; k <= count; k++) targets.push(startPos + step * k);
+  targets.push(startPos - step); // one behind, for quick back-nav
+  for (const i of targets) {
+    if (i < 0 || i >= pages.length) continue;
+    const rel = pages[i].rel_path;
+    if (_prefetchCache.has(rel)) continue;
+    _prefetchCache.add(rel);
+    const im = new Image();
+    im.src = `/api/media/${rel}`;
+  }
+}
+
 async function openReader(bookId) {
   const r = await fetch(`/api/books/${bookId}`);
   const data = await r.json();
   state.reader = { bookId, pages: data.pages, pos: 0 };
-  document.getElementById('readerModal').classList.remove('hidden');
-  document.getElementById('readerModal').classList.add('flex');
-  renderReaderPage();
+  const modal = document.getElementById('readerModal');
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  paintPanes();              // also recenters the track
+  prefetchPageImages(0, 3, 1);
 }
 
 function closeReader() {
-  document.getElementById('readerModal').classList.add('hidden');
-  document.getElementById('readerModal').classList.remove('flex');
+  const modal = document.getElementById('readerModal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  _readerResetTrack();
+  _prefetchCache.clear();
 }
 
-function renderReaderPage() {
+// --- Reader slide track ---------------------------------------------------
+// Manga RTL: drag RIGHT = next page, drag LEFT = prev. Pane layout (left->right)
+// = [next, current, prev]; rest state shows the centered current pane.
+function _readerTrackEl() { return document.getElementById('readerTrack'); }
+function _readerW() {
+  const vp = document.getElementById('readerViewport');
+  return (vp && vp.clientWidth) || window.innerWidth;
+}
+function _readerSetX(px, animate) {
+  const t = _readerTrackEl();
+  if (!t) return;
+  t.classList.toggle('reader-animating', !!animate);
+  t.style.transform = `translateX(${px}px)`;
+}
+function _readerResetTrack() { _readerSetX(-_readerW(), false); }
+
+// Paint the 3 panes from state.reader for the current pos, then snap the track
+// back to centered (no animation). RTL slot mapping: 0=next, 1=current, 2=prev.
+function paintPanes() {
   const { pages, pos } = state.reader;
-  if (!pages.length) return;
-  const p = pages[pos];
-  const img = document.getElementById('readerImg');
-  img.src = `/api/media/${p.rel_path}`;
-  document.getElementById('readerPageNum').textContent = `${pos + 1} / ${pages.length}`;
+  const imgs = _readerTrackEl()?.querySelectorAll('img[data-slot]');
+  if (!imgs) return;
+  const srcFor = (i) => (i >= 0 && i < pages.length) ? `/api/media/${pages[i].rel_path}` : '';
+  const map = [pos + 1, pos, pos - 1];
+  imgs.forEach((img, slot) => {
+    const want = srcFor(map[slot]);
+    if (want) { if (img.getAttribute('src') !== want) img.src = want; }
+    else img.removeAttribute('src');
+  });
+  document.getElementById('readerPageNum').textContent = pages.length ? `${pos + 1} / ${pages.length}` : '0 / 0';
+  _readerResetTrack();
 }
 
 function readerGo(delta) {
   const n = state.reader.pages.length;
   if (n === 0) return;
-  state.reader.pos = Math.max(0, Math.min(n - 1, state.reader.pos + delta));
-  renderReaderPage();
+  const prev = state.reader.pos;
+  state.reader.pos = Math.max(0, Math.min(n - 1, prev + delta));
+  paintPanes();
+  if (state.reader.pos !== prev) prefetchPageImages(state.reader.pos, 3, delta >= 0 ? 1 : -1);
 }
 
-// Reader keyboard & touch
+// Reader keyboard — RTL: ArrowLeft = next, ArrowRight = prev (manga). Flip for LTR.
 document.addEventListener('keydown', (e) => {
   if (document.getElementById('readerModal').classList.contains('hidden')) return;
   if (e.key === 'Escape') { closeReader(); e.preventDefault(); }
-  if (e.key === 'ArrowRight') { readerGo(1); e.preventDefault(); }
-  if (e.key === 'ArrowLeft') { readerGo(-1); e.preventDefault(); }
+  if (e.key === 'ArrowLeft') { readerGo(1); e.preventDefault(); }    // RTL: left = next
+  if (e.key === 'ArrowRight') { readerGo(-1); e.preventDefault(); }  // RTL: right = prev
 });
 
-// Touch swipe for reader
+// Reader drag — Pointer Events unify mouse + touch with finger-follow slide.
 (function() {
-  let startX = 0, startY = 0, tracking = false;
-  const modal = document.getElementById('readerModal');
-  modal.addEventListener('touchstart', (e) => {
-    startX = e.touches[0].clientX;
-    startY = e.touches[0].clientY;
-    tracking = true;
-  });
-  modal.addEventListener('touchend', (e) => {
-    if (!tracking) return;
-    tracking = false;
-    const dx = e.changedTouches[0].clientX - startX;
-    const dy = e.changedTouches[0].clientY - startY;
-    if (Math.abs(dx) < 50 || Math.abs(dy) > Math.abs(dx)) return;
-    if (dx < 0) readerGo(1);   // swipe left = next
-    else readerGo(-1);          // swipe right = prev
-  });
-})();
+  const COMMIT_RATIO = 0.18, AXIS_LOCK = 8, TAP_MAX = 10, ANIM_MS = 320;
+  let dragging = false, startX = 0, startY = 0, lastDX = 0, axis = null, moved = false, pid = null, W = 0;
+  let animToken = 0;
+  const vp = () => document.getElementById('readerViewport');
+  const isOpen = () => !document.getElementById('readerModal').classList.contains('hidden');
 
-// Click navigation: left half = prev, right half = next
-document.getElementById('readerImg')?.addEventListener('click', (e) => {
-  const rect = e.target.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  if (x < rect.width / 2) readerGo(-1);
-  else readerGo(1);
-});
+  function canGo(delta) {
+    const { pos, pages } = state.reader;
+    const target = pos + delta;
+    return target >= 0 && target < pages.length;
+  }
+
+  function onDown(e) {
+    if (!isOpen()) return;
+    animToken++;             // invalidate any in-flight commit animation
+    dragging = true; moved = false; axis = null;
+    startX = e.clientX; startY = e.clientY; lastDX = 0; pid = e.pointerId; W = _readerW();
+    try { vp().setPointerCapture(pid); } catch (_) {}
+    _readerTrackEl()?.classList.remove('reader-animating');  // follow finger 1:1
+  }
+
+  function onMove(e) {
+    if (!dragging) return;
+    const dx = e.clientX - startX, dy = e.clientY - startY;
+    if (axis === null && (Math.abs(dx) > AXIS_LOCK || Math.abs(dy) > AXIS_LOCK)) {
+      axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+    }
+    if (axis === 'y') return;
+    if (axis === 'x') moved = true;
+    lastDX = dx;
+    // Rubber-band when there's no page to reveal that way
+    // (drag right reveals next, drag left reveals prev).
+    let eff = dx;
+    if ((dx > 0 && !canGo(1)) || (dx < 0 && !canGo(-1))) eff = dx * 0.25;
+    _readerSetX(-W + eff, false);
+  }
+
+  function onUp(e) {
+    if (!dragging) return;
+    dragging = false;
+    try { vp().releasePointerCapture(pid); } catch (_) {}
+    const dx = lastDX;
+    if (!moved || Math.abs(dx) < TAP_MAX) { tapNav(e.clientX); return; }
+    if (axis === 'x' && Math.abs(dx) >= W * COMMIT_RATIO) {
+      commitTurn(dx > 0 ? 1 : -1);   // RTL: drag right = next, drag left = prev
+    } else {
+      snapBack();
+    }
+  }
+
+  function commitTurn(delta) {
+    if (!canGo(delta)) { snapBack(); return; }
+    const t = _readerTrackEl();
+    const target = delta > 0 ? 0 : -2 * W;   // reveal left (next) or right (prev) pane
+    const myToken = ++animToken;
+    let finished = false;
+    const finish = () => {
+      if (finished || myToken !== animToken) return;
+      finished = true;
+      t.removeEventListener('transitionend', finish);
+      readerGo(delta);   // update pos + repaint panes + recenter (no transition)
+    };
+    t.addEventListener('transitionend', finish);
+    setTimeout(finish, ANIM_MS);   // fallback if transitionend is missed
+    _readerSetX(target, true);
+  }
+
+  function snapBack() { animToken++; _readerSetX(-W, true); }
+
+  // RTL click zones: left half = next, right half = prev.
+  function tapNav(clientX) {
+    const w = _readerW();
+    if (clientX < w / 2) readerGo(1);   // left = next
+    else readerGo(-1);                  // right = prev
+  }
+
+  const v = vp();
+  if (v) {
+    v.addEventListener('pointerdown', onDown);
+    v.addEventListener('pointermove', onMove);
+    v.addEventListener('pointerup', onUp);
+    v.addEventListener('pointercancel', () => { if (dragging) { dragging = false; snapBack(); } });
+  }
+})();
 </script>
 </body>
 </html>

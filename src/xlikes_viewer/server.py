@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import dataclasses
+import hashlib
 import json as _json
 import os
 import secrets
@@ -18,6 +19,11 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from xlikes_viewer.book_dedup import (
+    BookIndexRunner,
+    fingerprint_for_ordered_files,
+    find_duplicate_book,
+)
 from xlikes_viewer.db import Database, TimelinePost
 from xlikes_viewer.dedup import DedupRunner, VisualDedupRunner
 from xlikes_viewer.like import like_tweet
@@ -309,11 +315,13 @@ def create_app(
     timeline_refresher = TimelineRefresher(db, gallerydl_config_path)
     dedup_runner = DedupRunner(db, library_root)
     visual_dedup_runner = VisualDedupRunner(db, library_root)
+    book_index_runner = BookIndexRunner(db, library_root, r2_client)
     app.state.db = db
     app.state.cdn_proxy = cdn_proxy
     app.state.timeline_refresher = timeline_refresher
     app.state.dedup_runner = dedup_runner
     app.state.visual_dedup_runner = visual_dedup_runner
+    app.state.book_index_runner = book_index_runner
 
     static_dir = Path(__file__).resolve().parent / "static"
 
@@ -350,6 +358,11 @@ def create_app(
         threading.Thread(target=_initial_scan, daemon=True).start()
     else:
         _initial_scan()
+
+    # Backfill perceptual fingerprints for existing books so duplicate detection
+    # works against the current shelf. start() spawns its own daemon thread and
+    # returns immediately; idempotent (only un-indexed books are processed).
+    book_index_runner.start()
 
     @app.get("/", response_class=HTMLResponse)
     def root() -> HTMLResponse:
@@ -512,16 +525,25 @@ def create_app(
         except ValueError as e:
             raise HTTPException(status_code=400, detail="path escape") from e
 
+        # Sidecar lives next to the media file as "<media>.json". Derive it from
+        # the media path rather than target.json_path: the DB-backed index sets
+        # json_path == media_path as a placeholder (unused when serving from R2),
+        # so target.json_path is unreliable here.
+        sidecar = media.with_name(media.name + ".json")
+        rel = media.relative_to(library_root_resolved).as_posix()
+
         with contextlib.suppress(FileNotFoundError):
             media.unlink()
         with contextlib.suppress(FileNotFoundError):
-            target.json_path.unlink()
+            sidecar.unlink()
 
-        # Lists + hash cache: cascade cleanup so they don't outlive the file.
-        # The gallery-dl archive.sqlite is intentionally untouched so the next
-        # sync does not re-download this tweet's media.
+        # Drop the DB row so the post leaves the index for good — otherwise a
+        # later sidecar re-ingest (_refresh_index) resurrects it. Lists + hash
+        # cache: cascade cleanup so they don't outlive the file. The gallery-dl
+        # archive.sqlite is intentionally untouched so the next sync does not
+        # re-download this tweet's media.
+        db.delete_post(tweet_id, num)
         db.remove_item_from_all_lists(tweet_id, num)
-        rel = media.relative_to(library_root_resolved).as_posix()
         db.forget_hash(rel)
         _refresh_index()
         return JSONResponse({"deleted": True})
@@ -914,14 +936,33 @@ def create_app(
             raise HTTPException(status_code=404, detail="not found")
         return target
 
+    # Media/book pages are immutable: a given rel_path always maps to the same
+    # bytes (filenames are never reused). So we can cache aggressively and serve
+    # cheap 304s without touching R2 — the single biggest reader-speed/R2-cost win.
+    _IMMUTABLE_CACHE = "public, max-age=31536000, immutable"
+
+    def _weak_etag(*parts: object) -> str:
+        raw = "|".join(str(p) for p in parts)
+        return 'W/"' + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16] + '"'
+
     @app.get("/api/media/{rel_path:path}")
-    async def api_media(rel_path: str) -> Response:
+    async def api_media(rel_path: str, request: Request) -> Response:
         """Serve media from R2 when configured, otherwise from the local library."""
         _validate_rel_path(rel_path)
+        etag = _weak_etag("media", rel_path)
+        # rel_path uniquely identifies immutable content, so the If-None-Match
+        # short-circuit needs no R2/disk read at all.
+        if request.headers.get("if-none-match") == etag:
+            return Response(
+                status_code=304,
+                headers={"ETag": etag, "Cache-Control": _IMMUTABLE_CACHE},
+            )
         if r2_client is not None:
             try:
                 content_length, content_type, body_iter = r2_client.stream_object(rel_path)
-                headers = {"content-length": str(content_length)} if content_length else {}
+                headers = {"Cache-Control": _IMMUTABLE_CACHE, "ETag": etag}
+                if content_length:
+                    headers["content-length"] = str(content_length)
                 return StreamingResponse(body_iter, media_type=content_type, headers=headers)
             except Exception:
                 # Fall through to local filesystem if key is absent in R2.
@@ -929,22 +970,34 @@ def create_app(
         target = (library_root / rel_path).resolve()
         if not target.is_file():
             raise HTTPException(status_code=404, detail="not found")
-        return FileResponse(target)
+        # FileResponse.set_stat_headers uses setdefault, so our ETag is preserved.
+        return FileResponse(target, headers={"Cache-Control": _IMMUTABLE_CACHE, "ETag": etag})
 
     @app.get("/media/{rel_path:path}")
     def media(rel_path: str) -> FileResponse:
-        return FileResponse(_resolve_under_library(rel_path))
+        return FileResponse(
+            _resolve_under_library(rel_path),
+            headers={"Cache-Control": _IMMUTABLE_CACHE},
+        )
 
     @app.get("/thumb/{rel_path:path}")
-    def thumb(rel_path: str, size: int = Query(default=400, ge=64, le=1600)) -> Response:
+    def thumb(
+        rel_path: str, request: Request, size: int = Query(default=400, ge=64, le=1600)
+    ) -> Response:
         _validate_rel_path(rel_path)
+        # Thumbnail bytes are deterministic for (rel_path, size) since the source
+        # page is immutable; include size so different ?size= values don't collide.
+        etag = _weak_etag("thumb", rel_path, size)
+        cache_headers = {"Cache-Control": _IMMUTABLE_CACHE, "ETag": etag}
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=cache_headers)
         target = library_root / rel_path
         # Try local file first (fast path, works during sync before R2 upload).
         if target.is_file():
             data = thumbnail_bytes(target.resolve(), size=size)
             if data is not None:
-                return Response(content=data, media_type="image/jpeg")
-            return FileResponse(target)
+                return Response(content=data, media_type="image/jpeg", headers=cache_headers)
+            return FileResponse(target, headers=cache_headers)
         # Local file is gone (uploaded to R2 and deleted) — generate from R2 stream.
         if r2_client is not None:
             try:
@@ -952,9 +1005,11 @@ def create_app(
                 raw = b"".join(body_iter)
                 data = thumbnail_bytes_from_raw(raw, size=size)
                 if data is not None:
-                    return Response(content=data, media_type="image/jpeg")
+                    return Response(content=data, media_type="image/jpeg", headers=cache_headers)
                 # Not an image (e.g. video) — serve the raw bytes directly.
-                return Response(content=raw, media_type="application/octet-stream")
+                return Response(
+                    content=raw, media_type="application/octet-stream", headers=cache_headers
+                )
             except Exception:
                 pass
         raise HTTPException(status_code=404, detail="not found")
@@ -1044,6 +1099,28 @@ def create_app(
         if cover_rel:
             with db._lock:
                 db._conn.execute("UPDATE books SET cover_path = ? WHERE id = ?", (cover_rel, book.id))
+
+        # Duplicate check (files are still on local disk, nothing uploaded yet).
+        import shutil
+        ordered_files = [library_root / rel for (_pn, rel, _w, _h) in pages]
+        page_count, cover_phash, samples = fingerprint_for_ordered_files(ordered_files)
+        dup = find_duplicate_book(db, page_count, cover_phash, samples)
+        if dup is not None:
+            # Roll back the just-created book + its files; report the match.
+            db.delete_book(book.id)  # cascades book_pages/tags/favorites/hashes
+            shutil.rmtree(book_dir, ignore_errors=True)
+            return JSONResponse(
+                {"skipped": True, "matched_book_id": dup[0], "matched_title": dup[1]},
+                status_code=200,
+            )
+        # Not a duplicate: persist its fingerprint so future imports can match it.
+        db.upsert_book_hash(
+            book_id=book.id,
+            page_count=page_count,
+            cover_phash=cover_phash,
+            sample_phashes=samples,
+            indexed_at=int(time.time()),
+        )
 
         # Upload to R2 if configured, then delete local copies
         if r2_client is not None:
@@ -1318,6 +1395,19 @@ def create_app(
 
             all_files.sort(key=lambda f: _natural_key(f.name))
 
+            # Skip if this import duplicates a book already on the shelf. The tmp
+            # files still exist here (before create + R2 upload), so we can
+            # fingerprint and bail out cleanly without touching the library.
+            _pc, _cover_phash, _samples = fingerprint_for_ordered_files(all_files)
+            _dup = find_duplicate_book(db, _pc, _cover_phash, _samples)
+            if _dup is not None:
+                with import_queue_lock:
+                    item["status"] = "skipped"
+                    item["matched_book_id"] = _dup[0]
+                    item["matched_title"] = _dup[1]
+                    item["progress"] = "重複のためスキップ"
+                return  # finally clause cleans tmp_dir + advances the queue
+
             book = db.create_book(title=title, cover_path=None, page_count=len(all_files))
             book_dir = library_root / _BOOKS_DIR / str(book.id)
             book_dir.mkdir(parents=True, exist_ok=True)
@@ -1354,6 +1444,16 @@ def create_app(
                     db._conn.execute(
                         "UPDATE books SET cover_path = ? WHERE id = ?", (cover_rel, book.id)
                     )
+
+            # Persist the fingerprint (computed above from tmp files) so future
+            # imports can detect duplicates of this book.
+            db.upsert_book_hash(
+                book_id=book.id,
+                page_count=_pc,
+                cover_phash=_cover_phash,
+                sample_phashes=_samples,
+                indexed_at=int(time.time()),
+            )
 
             # Upload to R2 if configured
             if r2_client is not None:
@@ -1397,6 +1497,8 @@ def create_app(
                 "book_id": None,
                 "title": "",
                 "progress": "待機中...",
+                "matched_book_id": None,
+                "matched_title": "",
             }
             import_queue.append(item)
             # Start processing if nothing is currently running
@@ -1409,6 +1511,18 @@ def create_app(
     def api_import_status() -> JSONResponse:
         with import_queue_lock:
             return JSONResponse({"queue": list(import_queue)})
+
+    @app.get("/api/books/index/status")
+    def api_book_index_status() -> JSONResponse:
+        s = book_index_runner.state
+        return JSONResponse(
+            {
+                "running": s.running,
+                "books_total": s.books_total,
+                "books_indexed": s.books_indexed,
+                "last_error": s.last_error,
+            }
+        )
 
     return app
 

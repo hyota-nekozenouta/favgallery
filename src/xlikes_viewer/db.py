@@ -125,6 +125,19 @@ CREATE TABLE IF NOT EXISTS book_favorites (
     book_id INTEGER PRIMARY KEY REFERENCES books(id) ON DELETE CASCADE,
     added_at REAL NOT NULL
 );
+
+-- Per-book perceptual fingerprint, used to skip duplicate books at import time.
+-- cover_phash = pHash of page 1; sample_phashes = JSON [[page_num, phash], ...]
+-- for a few sampled interior pages. Independent of media_hashes because book
+-- pages are uploaded to R2 and deleted locally (never enter media_hashes).
+CREATE TABLE IF NOT EXISTS book_hashes (
+    book_id        INTEGER PRIMARY KEY REFERENCES books(id) ON DELETE CASCADE,
+    page_count     INTEGER NOT NULL,
+    cover_phash    TEXT,
+    sample_phashes TEXT NOT NULL,
+    indexed_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS book_hashes_pc ON book_hashes(page_count);
 """
 
 
@@ -633,6 +646,19 @@ class Database:
             (n,) = self._conn.execute("SELECT COUNT(*) FROM posts").fetchone()
         return int(n)
 
+    def delete_post(self, tweet_id: str, num: int) -> bool:
+        """Remove a single post row. Returns True if a row was deleted.
+
+        Needed so a delete leaves the DB-backed index for good — without it,
+        build_index_from_db keeps returning the post (and a later sidecar
+        re-ingest would resurrect it).
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM posts WHERE tweet_id = ? AND num = ?", (tweet_id, num)
+            )
+            return cur.rowcount > 0
+
     # --- Books (bookshelf) ------------------------------------------------
 
     def books(self) -> list[BookSummary]:
@@ -723,3 +749,74 @@ class Database:
         with self._lock:
             rows = self._conn.execute("SELECT book_id FROM book_favorites").fetchall()
         return {r[0] for r in rows}
+
+    # --- Book fingerprints (duplicate detection) --------------------------
+
+    def get_book_hash(
+        self, book_id: int
+    ) -> tuple[int, str | None, list[tuple[int, str]]] | None:
+        """Return (page_count, cover_phash, [(page_num, phash), ...]) or None."""
+        with self._lock:
+            r = self._conn.execute(
+                "SELECT page_count, cover_phash, sample_phashes FROM book_hashes WHERE book_id = ?",
+                (book_id,),
+            ).fetchone()
+        if r is None:
+            return None
+        samples = [(int(pn), ph) for pn, ph in json.loads(r[2])]
+        return (int(r[0]), r[1], samples)
+
+    def upsert_book_hash(
+        self,
+        *,
+        book_id: int,
+        page_count: int,
+        cover_phash: str | None,
+        sample_phashes: list[tuple[int, str]],
+        indexed_at: int,
+    ) -> None:
+        payload = json.dumps([[int(pn), ph] for pn, ph in sample_phashes])
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO book_hashes
+                    (book_id, page_count, cover_phash, sample_phashes, indexed_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(book_id) DO UPDATE SET
+                    page_count = excluded.page_count,
+                    cover_phash = excluded.cover_phash,
+                    sample_phashes = excluded.sample_phashes,
+                    indexed_at = excluded.indexed_at
+                """,
+                (book_id, page_count, cover_phash, payload, indexed_at),
+            )
+
+    def book_ids_without_hash(self) -> list[int]:
+        """Book IDs that have no fingerprint yet (drives idempotent backfill)."""
+        sql = """
+            SELECT b.id FROM books b
+            LEFT JOIN book_hashes h ON h.book_id = b.id
+            WHERE h.book_id IS NULL
+            ORDER BY b.id
+        """
+        with self._lock:
+            rows = self._conn.execute(sql).fetchall()
+        return [r[0] for r in rows]
+
+    def candidate_books_by_page_count(
+        self, page_count: int
+    ) -> list[tuple[int, str, str | None, list[tuple[int, str]]]]:
+        """Fingerprinted books with a matching page_count (cheap match prefilter)."""
+        sql = """
+            SELECT h.book_id, b.title, h.cover_phash, h.sample_phashes
+              FROM book_hashes h
+              JOIN books b ON b.id = h.book_id
+             WHERE h.page_count = ?
+        """
+        with self._lock:
+            rows = self._conn.execute(sql, (page_count,)).fetchall()
+        out: list[tuple[int, str, str | None, list[tuple[int, str]]]] = []
+        for book_id, title, cover, samples_json in rows:
+            samples = [(int(pn), ph) for pn, ph in json.loads(samples_json)]
+            out.append((int(book_id), title, cover, samples))
+        return out
