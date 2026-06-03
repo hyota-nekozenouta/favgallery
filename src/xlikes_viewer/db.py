@@ -674,10 +674,16 @@ class Database:
     # --- Books (bookshelf) ------------------------------------------------
 
     def books(self) -> list[BookSummary]:
-        sql = "SELECT id, title, cover_path, page_count, created_at FROM books ORDER BY created_at DESC"
+        sql = (
+            "SELECT id, title, cover_path, page_count, created_at "
+            "FROM books ORDER BY created_at DESC"
+        )
         with self._lock:
             rows = self._conn.execute(sql).fetchall()
-        return [BookSummary(id=r[0], title=r[1], cover_path=r[2], page_count=r[3], created_at=r[4]) for r in rows]
+        return [
+            BookSummary(id=r[0], title=r[1], cover_path=r[2], page_count=r[3], created_at=r[4])
+            for r in rows
+        ]
 
     def get_book(self, book_id: int) -> BookSummary | None:
         sql = "SELECT id, title, cover_path, page_count, created_at FROM books WHERE id = ?"
@@ -695,7 +701,13 @@ class Database:
                 (title, cover_path, page_count, now),
             )
             book_id = cur.lastrowid
-        return BookSummary(id=book_id, title=title, cover_path=cover_path, page_count=page_count, created_at=now)
+        return BookSummary(
+            id=book_id,
+            title=title,
+            cover_path=cover_path,
+            page_count=page_count,
+            created_at=now,
+        )
 
     def delete_book(self, book_id: int) -> bool:
         with self._lock:
@@ -707,25 +719,36 @@ class Database:
             cur = self._conn.execute("UPDATE books SET title = ? WHERE id = ?", (title, book_id))
         return cur.rowcount > 0
 
-    def add_book_pages(self, book_id: int, pages: list[tuple[int, str, int | None, int | None]]) -> None:
+    def add_book_pages(
+        self, book_id: int, pages: list[tuple[int, str, int | None, int | None]]
+    ) -> None:
         """Insert pages. Each tuple: (page_num, rel_path, width, height)."""
         with self._lock:
             self._conn.executemany(
-                "INSERT INTO book_pages (book_id, page_num, rel_path, width, height) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO book_pages (book_id, page_num, rel_path, width, height) "
+                "VALUES (?, ?, ?, ?, ?)",
                 [(book_id, p[0], p[1], p[2], p[3]) for p in pages],
             )
 
     def book_pages(self, book_id: int) -> list[BookPage]:
-        sql = "SELECT book_id, page_num, rel_path, width, height FROM book_pages WHERE book_id = ? ORDER BY page_num"
+        sql = (
+            "SELECT book_id, page_num, rel_path, width, height "
+            "FROM book_pages WHERE book_id = ? ORDER BY page_num"
+        )
         with self._lock:
             rows = self._conn.execute(sql, (book_id,)).fetchall()
-        return [BookPage(book_id=r[0], page_num=r[1], rel_path=r[2], width=r[3], height=r[4]) for r in rows]
+        return [
+            BookPage(book_id=r[0], page_num=r[1], rel_path=r[2], width=r[3], height=r[4])
+            for r in rows
+        ]
 
     # --- Book Tags & Favorites ------------------------------------------------
 
     def book_tags(self, book_id: int) -> list[str]:
         with self._lock:
-            rows = self._conn.execute("SELECT tag FROM book_tags WHERE book_id = ?", (book_id,)).fetchall()
+            rows = self._conn.execute(
+                "SELECT tag FROM book_tags WHERE book_id = ?", (book_id,)
+            ).fetchall()
         return [r[0] for r in rows]
 
     def all_book_tags(self) -> list[tuple[str, int]]:

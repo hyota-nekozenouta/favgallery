@@ -296,7 +296,9 @@ class SyncRunner:
                 try:
                     self._on_complete()
                 except Exception:
-                    logging.getLogger(__name__).warning("on_complete callback failed", exc_info=True)
+                    logging.getLogger(__name__).warning(
+                        "on_complete callback failed", exc_info=True
+                    )
         except Exception as exc:
             err = f"{type(exc).__name__}: {exc}"
             rc = -1
