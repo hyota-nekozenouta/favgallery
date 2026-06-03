@@ -6,9 +6,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from gallery_dl import exception as gdle
 
 from xlikes_viewer.db import Database
 from xlikes_viewer.timeline import (
+    DEFAULT_TIMELINE_URL,
     REFRESH_COOLDOWN_SECONDS,
     TimelineRefresher,
     _post_from_meta,
@@ -111,6 +113,54 @@ def test_refresher_runs_via_mocked_fetch(db: Database, tmp_path: Path) -> None:
     assert "1" in tweet_ids
     assert "2" in tweet_ids
     assert r.state.last_added == 2
+    assert r.state.last_error is None
+
+
+@pytest.mark.unit
+def test_refresher_flags_auth_error_when_cookies_rejected(
+    db: Database, tmp_path: Path
+) -> None:
+    r = TimelineRefresher(db, tmp_path / "config.json")
+
+    def _fake_fetch(_config_path: Path, *, url: str, range_spec: str) -> list:
+        # DataJob stores the auth failure on job.exception; fetch_timeline_metadata
+        # re-raises it so the refresher can flag it (it does NOT silently return []).
+        raise gdle.AuthRequired(("auth_token", "cookies"), "timeline")
+
+    with patch("xlikes_viewer.timeline.fetch_timeline_metadata", side_effect=_fake_fetch):
+        r._worker(DEFAULT_TIMELINE_URL, "1-300")
+
+    assert r.state.auth_error is True
+    assert r.state.last_added == 0
+    assert r.state.last_error  # user-facing message set
+
+
+@pytest.mark.unit
+def test_refresher_flags_auth_error_on_expired_cookie_abort(
+    db: Database, tmp_path: Path
+) -> None:
+    # Expired-but-present cookies surface as AbortExtraction (NOT an auth type);
+    # only the message identifies it. The refresher must still flag auth_error.
+    r = TimelineRefresher(db, tmp_path / "config.json")
+
+    def _fake_fetch(_config_path: Path, *, url: str, range_spec: str) -> list:
+        raise gdle.AbortExtraction("Unable to retrieve Tweets from this timeline")
+
+    with patch("xlikes_viewer.timeline.fetch_timeline_metadata", side_effect=_fake_fetch):
+        r._worker(DEFAULT_TIMELINE_URL, "1-300")
+
+    assert r.state.auth_error is True
+    assert r.state.last_added == 0
+
+
+@pytest.mark.unit
+def test_refresher_clean_run_has_no_auth_error(db: Database, tmp_path: Path) -> None:
+    r = TimelineRefresher(db, tmp_path / "config.json")
+    with patch("xlikes_viewer.timeline.fetch_timeline_metadata", return_value=[]):
+        r._worker(DEFAULT_TIMELINE_URL, "1-300")
+
+    assert r.state.auth_error is False
+    assert r.state.last_added == 0
     assert r.state.last_error is None
 
 

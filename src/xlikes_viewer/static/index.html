@@ -491,8 +491,15 @@ $('#layoutToggle').addEventListener('click', () => {
 
 // --- Library / Authors / Tags -------------------------------------
 async function loadLibrary() {
-  const r = await fetch('/api/library');
-  const data = await r.json();
+  let data;
+  try {
+    const r = await fetch('/api/library');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    data = await r.json();
+  } catch (e) {
+    showNotice('ライブラリ情報の読み込みに失敗しました', { kind: 'error' });
+    return;
+  }
   state.authors = data.authors;
   state.tags = data.tags;
   const label = data.scanning ? `📚 スキャン中… ${data.post_count.toLocaleString()}` : `${data.post_count.toLocaleString()} posts`;
@@ -908,14 +915,25 @@ async function fetchPosts() {
     if (state.filter.list_id) params.set('list', state.filter.list_id);
     params.set('limit', state.limit); params.set('offset', state.offset);
   }
-  const r = await fetch(`${endpoint}?${params}`);
-  const data = await r.json();
-  state.total = data.total;
-  state.posts.push(...data.items);
-  $('#resultCount').textContent = `${state.total.toLocaleString()} 件`;
-  appendTiles(data.items);
-  state.offset += data.items.length;
-  state.loading = false;
+  try {
+    const r = await fetch(`${endpoint}?${params}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    const items = data.items || [];
+    state.total = data.total ?? 0;
+    state.posts.push(...items);
+    $('#resultCount').textContent = `${state.total.toLocaleString()} 件`;
+    appendTiles(items);
+    state.offset += items.length;
+    state.loading = false;
+  } catch (e) {
+    // Used to fail silently (empty grid). Surface it instead. Keep state.loading
+    // true briefly so the infinite-scroll sentinel doesn't hammer a failing
+    // endpoint, then clear it so a transient blip can still resume (don't pin
+    // state.total, which would permanently stop pagination).
+    showNotice('投稿の読み込みに失敗しました: ' + (e.message || e), { kind: 'error' });
+    setTimeout(() => { state.loading = false; }, 5000);
+  }
 }
 
 function compareIds(a, b) {
@@ -1494,6 +1512,28 @@ $$('.mt-btn').forEach(b => b.addEventListener('click', () => {
 
 // --- Refresh / Sync (likes archive) -------------------------------
 
+// --- Notification banner (sync/timeline results + errors) ----------
+// One shared banner. Errors (e.g. expired cookies) stay until clicked; info
+// notices auto-dismiss. Surfaces outcomes that used to fail silently.
+function showNotice(message, { kind = 'info', sticky = false } = {}) {
+  document.getElementById('appNotice')?.remove();
+  const el = document.createElement('div');
+  el.id = 'appNotice';
+  const palette = kind === 'error'
+    ? 'background:#7f1d1d;color:#fecaca;'
+    : 'background:#14532d;color:#bbf7d0;';
+  el.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);'
+    + palette + 'padding:8px 16px;border-radius:6px;font-size:13px;z-index:9999;'
+    + 'max-width:80%;text-align:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4);';
+  el.textContent = message;
+  el.title = 'クリックで閉じる';
+  el.onclick = () => el.remove();
+  document.body.appendChild(el);
+  if (!sticky) setTimeout(() => { if (el.isConnected) el.remove(); }, 8000);
+}
+
+const COOKIE_EXPIRED_MSG = 'X の cookie が失効している可能性があります。再ログインして cookies を更新してください。';
+
 async function pollSync() {
   const r = await fetch('/api/sync/status');
   const s = await r.json();
@@ -1504,6 +1544,18 @@ async function pollSync() {
   } else if (state.syncRunning) {
     state.syncRunning = false;
     _syncActive = false; updateLoadingState();
+    // Surface the outcome so a silent cookie-expiry failure becomes visible,
+    // and so newly-synced likes actually appear without a manual reload.
+    if (s.auth_error) {
+      // Fixed message (don't echo raw backend error text in the banner).
+      showNotice(COOKIE_EXPIRED_MSG, { kind: 'error', sticky: true });
+    } else if (s.last_added > 0) {
+      showNotice(`新着 ${s.last_added} 件を取り込みました`, { kind: 'info' });
+      await loadLibrary();
+      if (state.tab === 'likes') { state.offset = 0; state.posts = []; await fetchPosts(); }
+    } else {
+      showNotice('同期完了：新着なし', { kind: 'info' });
+    }
     await fetch('/api/dedup/run', { method: 'POST' });
     pollDedup({ refreshAfter: true });
     await fetch('/api/dedup/visual/run', { method: 'POST' });
@@ -1761,11 +1813,16 @@ async function pollTimeline() {
   const tag = s.last_added ? ` (+${s.last_added})` : '';
   $('#timelineRefreshBtn').textContent = `⟳ 取得${tag}`;
   $('#timelineRefreshBtn').disabled = false;
+  if (s.auth_error) {
+    showNotice(COOKIE_EXPIRED_MSG, { kind: 'error', sticky: true });
+  } else if (s.last_added > 0) {
+    showNotice(`タイムライン 新着 ${s.last_added} 件`, { kind: 'info' });
+  }
   if (state.tab === 'timeline') {
     state.offset = 0; state.posts = [];
     fetchPosts();
   }
-  if (s.last_error) console.warn('timeline refresh error:', s.last_error);
+  if (s.last_error && !s.auth_error) console.warn('timeline refresh error:', s.last_error);
 }
 
 // --- Infinite scroll ----------------------------------------------
@@ -1801,14 +1858,7 @@ async function loadFavoriteAuthors() {
       // 409 = already running → silent ignore. Other errors (e.g. 400 = cookies missing) → notify.
       const d = await syncRes.json().catch(() => ({}));
       const reason = d.reason || `HTTP ${syncRes.status}`;
-      const errEl = document.createElement('div');
-      errEl.id = 'syncErrorBanner';
-      errEl.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);'
-        + 'background:#7f1d1d;color:#fca5a5;padding:8px 16px;border-radius:6px;'
-        + 'font-size:13px;z-index:9999;max-width:80%;text-align:center;';
-      errEl.textContent = '同期エラー: ' + reason;
-      document.body.appendChild(errEl);
-      setTimeout(() => errEl.remove(), 15000);
+      showNotice('同期エラー: ' + reason, { kind: 'error', sticky: true });
     }
   } catch { /* network error during sync start — ignore */ }
   await pollSync();

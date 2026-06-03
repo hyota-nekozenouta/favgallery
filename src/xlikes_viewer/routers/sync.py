@@ -20,6 +20,8 @@ def sync_status(ctx: AppContext = Depends(get_context)) -> JSONResponse:
             "finished_at": s.finished_at,
             "return_code": s.last_return_code,
             "error": s.last_error,
+            "last_added": s.last_added,
+            "auth_error": s.auth_error,
             "exe_present": True,  # gallery-dl is always available
             "log_tail": list(s.log_lines)[-40:],
         }

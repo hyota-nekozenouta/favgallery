@@ -10,6 +10,11 @@ from pathlib import Path
 from time import time
 from typing import TYPE_CHECKING, Any
 
+from xlikes_viewer.gdl_errors import (
+    AUTH_FAILURE_MESSAGE,
+    capture_gdl_logs,
+    detect_auth_failure,
+)
 from xlikes_viewer.keys import iter_media_keys
 
 if TYPE_CHECKING:
@@ -29,21 +34,9 @@ class SyncState:
     finished_at: float | None = None
     last_return_code: int | None = None
     last_error: str | None = None
+    last_added: int | None = None  # new posts ingested by the most recent sync
+    auth_error: bool = False  # gallery-dl logged an auth failure (cookies expired)
     log_lines: deque[str] = field(default_factory=lambda: deque(maxlen=LOG_RING_SIZE))
-
-
-class _DequeHandler(logging.Handler):
-    """Logging handler that appends formatted records to a deque."""
-
-    def __init__(self, target: deque[str]) -> None:
-        super().__init__()
-        self._target = target
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            self._target.append(self.format(record))
-        except Exception:
-            self.handleError(record)
 
 
 class _NullContext:
@@ -98,6 +91,8 @@ class SyncRunner:
             self.state.finished_at = None
             self.state.last_return_code = None
             self.state.last_error = None
+            self.state.last_added = None
+            self.state.auth_error = False
             self.state.log_lines.clear()
             self._stop_event.clear()
             self._thread = threading.Thread(target=self._worker, daemon=True)
@@ -227,13 +222,9 @@ class SyncRunner:
 
         from xlikes_viewer.gallerydl import prepare_config
 
-        gdl_logger = logging.getLogger("gallery_dl")
-        handler = _DequeHandler(self.state.log_lines)
-        handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-        gdl_logger.addHandler(handler)
-
         rc = 0
         err: str | None = None
+        added = 0  # new posts ingested this run (posts_count delta)
         # Start parallel R2 upload thread to prevent disk from filling up.
         upload_stop = threading.Event()
         upload_thread: threading.Thread | None = None
@@ -253,11 +244,16 @@ class SyncRunner:
                 rc = 130  # interrupted before start
                 return
 
+            before = self._db.posts_count()
             url = f"https://x.com/{username}/likes"
             self.state.log_lines.append(f"[sync] starting: {url}")
 
+            # Capture the gallery-dl/extractor logs only while holding gdl_lock,
+            # so a concurrent timeline refresh (which also takes the lock) can't
+            # leak its log lines into this run's auth detection. The X extractor
+            # logs to the 'twitter' logger, which capture_gdl_logs collects.
             ctx: Any = self._gdl_lock if self._gdl_lock is not None else _NullContext()
-            with ctx:
+            with ctx, capture_gdl_logs(self.state.log_lines):
                 prepare_config(self.config_path, archive=..., twitter_retweets=False)
                 gdl_job.DownloadJob(url).run()
 
@@ -275,6 +271,8 @@ class SyncRunner:
                     logging.getLogger(__name__).warning(
                         "on_complete callback failed", exc_info=True
                     )
+            # Clamp: a concurrent dedup delete could otherwise make this negative.
+            added = max(0, self._db.posts_count() - before)
         except Exception as exc:
             err = f"{type(exc).__name__}: {exc}"
             rc = -1
@@ -282,9 +280,17 @@ class SyncRunner:
             upload_stop.set()
             if upload_thread is not None:
                 upload_thread.join(timeout=5)
-            gdl_logger.removeHandler(handler)
+            # gallery-dl does not raise on expired cookies — Job.run() logs the
+            # AuthorizationError/AuthRequired on the 'twitter' logger and returns
+            # normally. Scan a snapshot (the deque may still be mutated) so the UI
+            # can tell "cookies expired" apart from "nothing new".
+            auth = detect_auth_failure(list(self.state.log_lines))
+            if auth and not err:
+                err = AUTH_FAILURE_MESSAGE
             with self._lock:
                 self.state.running = False
                 self.state.finished_at = time()
                 self.state.last_return_code = rc
                 self.state.last_error = err
+                self.state.last_added = added
+                self.state.auth_error = auth

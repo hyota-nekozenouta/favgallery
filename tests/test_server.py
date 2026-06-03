@@ -167,6 +167,23 @@ def test_sync_status_reports_exe_presence(client: TestClient) -> None:
 
 
 @pytest.mark.integration
+def test_sync_status_exposes_added_and_auth_error(client: TestClient) -> None:
+    data = client.get("/api/sync/status").json()
+    # The UI needs these to distinguish "cookies expired" from "nothing new".
+    assert "last_added" in data
+    assert "auth_error" in data
+    assert data["auth_error"] is False  # fresh app: no failure yet
+
+
+@pytest.mark.integration
+def test_timeline_status_exposes_auth_error(client: TestClient) -> None:
+    data = client.get("/api/timeline/status").json()
+    assert "last_added" in data
+    assert "auth_error" in data
+    assert data["auth_error"] is False
+
+
+@pytest.mark.integration
 def test_library_refresh_works(client: TestClient) -> None:
     r = client.post("/api/library/refresh")
     assert r.status_code == 200

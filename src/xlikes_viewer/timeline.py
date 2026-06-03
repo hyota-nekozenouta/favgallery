@@ -7,11 +7,18 @@ import logging
 import re
 import threading
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
 from xlikes_viewer.db import Database, TimelinePost
 from xlikes_viewer.gallerydl import prepare_config
+from xlikes_viewer.gdl_errors import (
+    AUTH_FAILURE_MESSAGE,
+    capture_gdl_logs,
+    detect_auth_failure,
+    is_auth_failure,
+)
 from xlikes_viewer.x_helpers import DISPLAYABLE_MEDIA_TYPES, extract_hashtags
 
 log = logging.getLogger("xlikes_viewer.timeline")
@@ -27,6 +34,7 @@ class RefreshState:
     last_finished: float | None = None
     last_error: str | None = None
     last_added: int = 0
+    auth_error: bool = False  # gallery-dl logged an auth failure (cookies expired)
 
 
 def _post_from_meta(url: str, meta: dict, fetched_at: int) -> TimelinePost | None:
@@ -146,6 +154,12 @@ def fetch_timeline_metadata(
     sink = io.StringIO()
     data_job = job.DataJob(url, file=sink)
     data_job.run()
+    # DataJob.run() swallows exceptions onto job.exception (it does not log or
+    # re-raise). Surface auth failures (missing OR expired cookies — the latter
+    # is a message-only AbortExtraction) so callers fail loud instead of
+    # silently returning an empty list.
+    if is_auth_failure(getattr(data_job, "exception", None)):
+        raise data_job.exception
     pairs: list[tuple[str, dict]] = []
     for u, m in zip(data_job.data_urls, data_job.data_meta, strict=False):
         if isinstance(u, str) and isinstance(m, dict):
@@ -156,11 +170,20 @@ def fetch_timeline_metadata(
 class TimelineRefresher:
     """Single-flight orchestrator for /api/timeline/refresh."""
 
-    def __init__(self, db: Database, gallerydl_config_path: Path) -> None:
+    def __init__(
+        self,
+        db: Database,
+        gallerydl_config_path: Path,
+        *,
+        gdl_lock: threading.Lock | None = None,
+    ) -> None:
         self.db = db
         self.gallerydl_config_path = gallerydl_config_path
         self.state = RefreshState()
         self._lock = threading.Lock()
+        # Shared with SyncRunner / unliked fetch: serializes gallery-dl global
+        # config writes and scopes log capture so concurrent runs don't mix.
+        self._gdl_lock = gdl_lock
 
     def _can_start_locked(self) -> tuple[bool, str | None]:
         if self.state.running:
@@ -185,6 +208,7 @@ class TimelineRefresher:
             self.state.last_started = time.time()
             self.state.last_error = None
             self.state.last_added = 0
+            self.state.auth_error = False
         threading.Thread(
             target=self._worker,
             args=(url, range_spec),
@@ -194,10 +218,16 @@ class TimelineRefresher:
 
     def _worker(self, url: str, range_spec: str) -> None:
         added = 0
+        auth = False
+        gdl_ctx = self._gdl_lock if self._gdl_lock is not None else nullcontext()
         try:
-            pairs = fetch_timeline_metadata(
-                self.gallerydl_config_path, url=url, range_spec=range_spec
-            )
+            # Hold gdl_lock around the gallery-dl run so a concurrent sync can't
+            # race the shared config write or leak log lines into our capture.
+            with gdl_ctx, capture_gdl_logs() as gdl_logs:
+                pairs = fetch_timeline_metadata(
+                    self.gallerydl_config_path, url=url, range_spec=range_spec
+                )
+            auth = detect_auth_failure(gdl_logs)
             now = int(time.time())
             for u, meta in pairs:
                 post = _post_from_meta(u, meta, now)
@@ -208,6 +238,10 @@ class TimelineRefresher:
                 self.db.upsert_timeline_post(post)
                 added += 1
         except Exception as exc:
+            # fetch_timeline_metadata re-raises gallery-dl auth failures
+            # (DataJob stores them silently otherwise) — flag them for the UI,
+            # by type (AuthRequired) or message (expired-cookie AbortExtraction).
+            auth = auth or is_auth_failure(exc)
             log.exception("timeline refresh failed")
             with self._lock:
                 self.state.last_error = f"{type(exc).__name__}: {exc}"
@@ -216,3 +250,6 @@ class TimelineRefresher:
                 self.state.running = False
                 self.state.last_finished = time.time()
                 self.state.last_added = added
+                self.state.auth_error = auth
+                if auth and not self.state.last_error:
+                    self.state.last_error = AUTH_FAILURE_MESSAGE

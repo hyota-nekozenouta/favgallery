@@ -146,7 +146,13 @@ def create_app(
     )
     _fav_authors_path = library_root.parent.parent / "config" / "favorite_authors.json"
     _ensure_gallerydl_config(gallerydl_config_path, library_root)
-    timeline_refresher = TimelineRefresher(db, gallerydl_config_path)
+    # Serialize gallery-dl invocations: prepare_config touches global state.
+    # Shared by SyncRunner, TimelineRefresher, and the unliked author fetch so
+    # concurrent runs don't trample the config or mix captured log lines.
+    unliked_lock = threading.Lock()
+    timeline_refresher = TimelineRefresher(
+        db, gallerydl_config_path, gdl_lock=unliked_lock
+    )
     dedup_runner = DedupRunner(db, library_root)
     visual_dedup_runner = VisualDedupRunner(db, library_root)
     book_index_runner = BookIndexRunner(db, library_root, r2_client)
@@ -201,9 +207,6 @@ def create_app(
 
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
-
-    # Serialize gallery-dl invocations: prepare_config touches global state.
-    unliked_lock = threading.Lock()
 
     def _after_sync() -> None:
         """Refresh index and auto-run dedup after a successful sync."""

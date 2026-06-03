@@ -78,6 +78,7 @@ def timeline_status(ctx: AppContext = Depends(get_context)) -> JSONResponse:
             "last_finished": s.last_finished,
             "last_added": s.last_added,
             "last_error": s.last_error,
+            "auth_error": s.auth_error,
         }
     )
 
