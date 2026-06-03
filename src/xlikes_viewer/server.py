@@ -11,8 +11,8 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -25,18 +25,17 @@ from xlikes_viewer.context import AppContext
 from xlikes_viewer.db import Database
 from xlikes_viewer.dedup import DedupRunner, VisualDedupRunner
 from xlikes_viewer.gallerydl_config import build_book_import_config, write_gallerydl_config
-from xlikes_viewer.like import like_tweet
 from xlikes_viewer.paths import portable_root
-from xlikes_viewer.payloads import _timeline_payload
-from xlikes_viewer.proxy import CdnProxy, is_allowed
+from xlikes_viewer.proxy import CdnProxy
 from xlikes_viewer.r2 import R2Client, r2_config_from_env
 from xlikes_viewer.routers import admin as admin_router
 from xlikes_viewer.routers import dedup as dedup_router
 from xlikes_viewer.routers import lists as lists_router
+from xlikes_viewer.routers import me as me_router
 from xlikes_viewer.routers import media as media_router
 from xlikes_viewer.routers import posts as posts_router
 from xlikes_viewer.routers import sync as sync_router
-from xlikes_viewer.save_one import save_tweet
+from xlikes_viewer.routers import timeline as timeline_router
 from xlikes_viewer.scanner import (
     DEFAULT_LIBRARY,
     Index,
@@ -46,7 +45,6 @@ from xlikes_viewer.scanner import (
 from xlikes_viewer.sync import SyncRunner
 from xlikes_viewer.timeline import (
     TimelineRefresher,
-    fetch_my_liked_tweet_ids,
 )
 
 
@@ -257,35 +255,9 @@ def create_app(
 
     library_root_resolved = library_root.resolve()
 
-    # --- Timeline ------------------------------------------------------
-
-    @app.get("/api/timeline")
-    def timeline_index(
-        media_type: str | None = None,
-        limit: int = Query(default=100, ge=1, le=500),
-        offset: int = Query(default=0, ge=0),
-        hide_liked: bool = Query(default=False),
-    ) -> JSONResponse:
-        total, posts = db.list_timeline_posts(
-            limit=limit, offset=offset, media_type=media_type, exclude_liked=hide_liked
-        )
-        return JSONResponse(
-            {
-                "total": total,
-                "items": [_timeline_payload(p) for p in posts],
-                "offset": offset,
-                "limit": limit,
-            }
-        )
-
-    @app.get("/api/timeline/by-tweet/{tweet_id}")
-    def timeline_by_tweet(tweet_id: str) -> JSONResponse:
-        posts = db.select_timeline_posts_by_tweet(tweet_id)
-        return JSONResponse({"items": [_timeline_payload(p) for p in posts]})
-
-    # --- My-likes cache (own X likes set) ------------------------------
-    # Single-flight orchestrator state for /api/me/likes/sync. gallery-dl's
-    # global config makes parallel runs unsafe, so we serialize through this.
+    # Single-flight orchestrator state for /api/me/likes/sync (in routers/me.py).
+    # gallery-dl's global config makes parallel runs unsafe, so the me router
+    # serializes through this shared state + lock (held on the AppContext).
     me_likes_state: dict[str, object] = {
         "running": False,
         "last_started": None,
@@ -294,158 +266,6 @@ def create_app(
         "last_added": 0,
     }
     me_likes_lock = threading.Lock()
-
-    def _me_username() -> str:
-        return (db.get_setting(_MY_USERNAME_KEY) or "").strip()
-
-    @app.get("/api/me")
-    def api_me_get() -> JSONResponse:
-        return JSONResponse(
-            {
-                "username": _me_username(),
-                "my_likes_count": db.my_likes_count(),
-            }
-        )
-
-    @app.post("/api/me")
-    def api_me_set(body: _MeBody) -> JSONResponse:
-        name = body.username.strip().lstrip("@")
-        if not name:
-            db.set_setting(_MY_USERNAME_KEY, "")
-            return JSONResponse({"username": ""})
-        # Permissive validator: X handles are 1–15 chars of [A-Za-z0-9_].
-        import re
-        if not re.fullmatch(r"[A-Za-z0-9_]{1,15}", name):
-            raise HTTPException(status_code=400, detail="invalid X username")
-        db.set_setting(_MY_USERNAME_KEY, name)
-        return JSONResponse({"username": name})
-
-    @app.get("/api/me/likes/status")
-    def api_me_likes_status() -> JSONResponse:
-        with me_likes_lock:
-            snapshot = dict(me_likes_state)
-        snapshot["count"] = db.my_likes_count()
-        snapshot["username"] = _me_username()
-        return JSONResponse(snapshot)
-
-    def _me_likes_worker(username: str, range_spec: str) -> None:
-        added = 0
-        try:
-            with unliked_lock:  # share gallery-dl serialization with /unliked
-                tweet_ids = fetch_my_liked_tweet_ids(
-                    gallerydl_config_path, username, range_spec=range_spec
-                )
-            added = db.upsert_my_likes(tweet_ids)
-        except Exception as exc:
-            with me_likes_lock:
-                me_likes_state["last_error"] = f"{type(exc).__name__}: {exc}"
-        finally:
-            with me_likes_lock:
-                me_likes_state["running"] = False
-                me_likes_state["last_finished"] = time.time()
-                me_likes_state["last_added"] = added
-
-    @app.post("/api/me/likes/sync")
-    def api_me_likes_sync(
-        range_spec: str = Query(default="1-200", alias="range"),
-    ) -> JSONResponse:
-        username = _me_username()
-        if not username:
-            raise HTTPException(status_code=400, detail="set username first via POST /api/me")
-        with me_likes_lock:
-            if me_likes_state["running"]:
-                return JSONResponse({"started": False, "reason": "already running"}, status_code=409)
-            me_likes_state["running"] = True
-            me_likes_state["last_started"] = time.time()
-            me_likes_state["last_error"] = None
-            me_likes_state["last_added"] = 0
-        threading.Thread(
-            target=_me_likes_worker, args=(username, range_spec), daemon=True
-        ).start()
-        return JSONResponse({"started": True})
-
-    @app.delete("/api/me/likes")
-    def api_me_likes_clear() -> JSONResponse:
-        db.clear_my_likes()
-        return JSONResponse({"cleared": True})
-
-    @app.post("/api/timeline/refresh")
-    def timeline_refresh() -> JSONResponse:
-        ok, reason = timeline_refresher.can_start()
-        if not ok:
-            return JSONResponse(
-                {"started": False, "reason": reason}, status_code=429 if reason else 409
-            )
-        timeline_refresher.start()
-        return JSONResponse({"started": True})
-
-    @app.get("/api/timeline/status")
-    def timeline_status() -> JSONResponse:
-        s = timeline_refresher.state
-        return JSONResponse(
-            {
-                "running": s.running,
-                "last_started": s.last_started,
-                "last_finished": s.last_finished,
-                "last_added": s.last_added,
-                "last_error": s.last_error,
-            }
-        )
-
-    @app.get("/api/timeline/last-seen")
-    def timeline_last_seen() -> JSONResponse:
-        return JSONResponse({"tweet_id": db.get_setting(_LAST_SEEN_KEY) or ""})
-
-    @app.post("/api/timeline/last-seen")
-    def timeline_set_last_seen(body: _LastSeenBody) -> JSONResponse:
-        db.set_setting(_LAST_SEEN_KEY, body.tweet_id)
-        return JSONResponse({"tweet_id": body.tweet_id})
-
-    @app.post("/api/timeline/like-and-save")
-    def timeline_like_and_save(body: _LikeAndSaveBody) -> JSONResponse:
-        like_result = like_tweet(cookies_file, body.tweet_id)
-        save_result = None
-        if like_result.ok:
-            # Record it in the my_likes cache so the "未いいね" filter hides
-            # this tweet on subsequent fetches even if save_tweet fails.
-            db.upsert_my_likes([body.tweet_id])
-            save_result = save_tweet(
-                gallerydl_config_path,
-                author_name=body.author_name,
-                tweet_id=body.tweet_id,
-            )
-            if save_result.ok:
-                # Refresh the in-memory index so the new file appears in /api/posts
-                _refresh_index()
-        return JSONResponse(
-            {
-                "liked": like_result.ok,
-                "like_status": like_result.status_code,
-                "like_message": like_result.message,
-                "saved": save_result.ok if save_result else False,
-                "save_message": save_result.message if save_result else "",
-            }
-        )
-
-    @app.get("/api/timeline/proxy")
-    async def timeline_proxy(request: Request, url: str) -> Response:
-        if not is_allowed(url):
-            raise HTTPException(status_code=400, detail="disallowed host")
-        parsed = urlparse(url)
-        if parsed.scheme != "https":
-            raise HTTPException(status_code=400, detail="https only")
-        range_header = request.headers.get("range")
-        try:
-            status, headers, body_iter = await cdn_proxy.stream(url, range_header=range_header)
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"upstream error: {exc}") from exc
-        return StreamingResponse(body_iter, status_code=status, headers=headers)
-
-    # --- Sync (xlikes downloader) -------------------------------------
-
-    # --- Admin --------------------------------------------------------
-
-
 
     # --- Books (bookshelf) ------------------------------------------------
 
@@ -699,7 +519,6 @@ def create_app(
 
     def _scrape_images_from_html(url: str, tmp_dir: Path) -> list[Path]:
         """サイトに応じたスクレイパーを選択して実行"""
-        from urllib.parse import urlparse
         host = urlparse(url).netloc.lower()
 
         # サイト別ルーティング
@@ -985,6 +804,8 @@ def create_app(
     app.include_router(lists_router.router)
     app.include_router(posts_router.router)
     app.include_router(media_router.router)
+    app.include_router(timeline_router.router)
+    app.include_router(me_router.router)
 
     return app
 
