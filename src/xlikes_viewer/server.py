@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import json as _json
 import os
 import secrets
@@ -13,7 +12,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -34,6 +33,7 @@ from xlikes_viewer.r2 import R2Client, r2_config_from_env
 from xlikes_viewer.routers import admin as admin_router
 from xlikes_viewer.routers import dedup as dedup_router
 from xlikes_viewer.routers import lists as lists_router
+from xlikes_viewer.routers import media as media_router
 from xlikes_viewer.routers import posts as posts_router
 from xlikes_viewer.routers import sync as sync_router
 from xlikes_viewer.save_one import save_tweet
@@ -44,7 +44,6 @@ from xlikes_viewer.scanner import (
     ingest_to_db,
 )
 from xlikes_viewer.sync import SyncRunner
-from xlikes_viewer.thumbs import thumbnail_bytes, thumbnail_bytes_from_raw
 from xlikes_viewer.timeline import (
     TimelineRefresher,
     fetch_my_liked_tweet_ids,
@@ -447,103 +446,6 @@ def create_app(
     # --- Admin --------------------------------------------------------
 
 
-    # --- Media (likes archive) ----------------------------------------
-
-    def _validate_rel_path(rel_path: str) -> None:
-        """Raise HTTPException if rel_path attempts to escape library_root."""
-        target = (library_root / rel_path).resolve()
-        try:
-            target.relative_to(library_root_resolved)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail="path escape") from e
-
-    def _resolve_under_library(rel_path: str) -> Path:
-        target = (library_root / rel_path).resolve()
-        try:
-            target.relative_to(library_root_resolved)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail="path escape") from e
-        if not target.is_file():
-            raise HTTPException(status_code=404, detail="not found")
-        return target
-
-    # Media/book pages are immutable: a given rel_path always maps to the same
-    # bytes (filenames are never reused). So we can cache aggressively and serve
-    # cheap 304s without touching R2 — the single biggest reader-speed/R2-cost win.
-    _IMMUTABLE_CACHE = "public, max-age=31536000, immutable"
-
-    def _weak_etag(*parts: object) -> str:
-        raw = "|".join(str(p) for p in parts)
-        return 'W/"' + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16] + '"'
-
-    @app.get("/api/media/{rel_path:path}")
-    async def api_media(rel_path: str, request: Request) -> Response:
-        """Serve media from R2 when configured, otherwise from the local library."""
-        _validate_rel_path(rel_path)
-        etag = _weak_etag("media", rel_path)
-        # rel_path uniquely identifies immutable content, so the If-None-Match
-        # short-circuit needs no R2/disk read at all.
-        if request.headers.get("if-none-match") == etag:
-            return Response(
-                status_code=304,
-                headers={"ETag": etag, "Cache-Control": _IMMUTABLE_CACHE},
-            )
-        if r2_client is not None:
-            try:
-                content_length, content_type, body_iter = r2_client.stream_object(rel_path)
-                headers = {"Cache-Control": _IMMUTABLE_CACHE, "ETag": etag}
-                if content_length:
-                    headers["content-length"] = str(content_length)
-                return StreamingResponse(body_iter, media_type=content_type, headers=headers)
-            except Exception:
-                # Fall through to local filesystem if key is absent in R2.
-                pass
-        target = (library_root / rel_path).resolve()
-        if not target.is_file():
-            raise HTTPException(status_code=404, detail="not found")
-        # FileResponse.set_stat_headers uses setdefault, so our ETag is preserved.
-        return FileResponse(target, headers={"Cache-Control": _IMMUTABLE_CACHE, "ETag": etag})
-
-    @app.get("/media/{rel_path:path}")
-    def media(rel_path: str) -> FileResponse:
-        return FileResponse(
-            _resolve_under_library(rel_path),
-            headers={"Cache-Control": _IMMUTABLE_CACHE},
-        )
-
-    @app.get("/thumb/{rel_path:path}")
-    def thumb(
-        rel_path: str, request: Request, size: int = Query(default=400, ge=64, le=1600)
-    ) -> Response:
-        _validate_rel_path(rel_path)
-        # Thumbnail bytes are deterministic for (rel_path, size) since the source
-        # page is immutable; include size so different ?size= values don't collide.
-        etag = _weak_etag("thumb", rel_path, size)
-        cache_headers = {"Cache-Control": _IMMUTABLE_CACHE, "ETag": etag}
-        if request.headers.get("if-none-match") == etag:
-            return Response(status_code=304, headers=cache_headers)
-        target = library_root / rel_path
-        # Try local file first (fast path, works during sync before R2 upload).
-        if target.is_file():
-            data = thumbnail_bytes(target.resolve(), size=size)
-            if data is not None:
-                return Response(content=data, media_type="image/jpeg", headers=cache_headers)
-            return FileResponse(target, headers=cache_headers)
-        # Local file is gone (uploaded to R2 and deleted) — generate from R2 stream.
-        if r2_client is not None:
-            try:
-                _, _, body_iter = r2_client.stream_object(rel_path)
-                raw = b"".join(body_iter)
-                data = thumbnail_bytes_from_raw(raw, size=size)
-                if data is not None:
-                    return Response(content=data, media_type="image/jpeg", headers=cache_headers)
-                # Not an image (e.g. video) — serve the raw bytes directly.
-                return Response(
-                    content=raw, media_type="application/octet-stream", headers=cache_headers
-                )
-            except Exception:
-                pass
-        raise HTTPException(status_code=404, detail="not found")
 
     # --- Books (bookshelf) ------------------------------------------------
 
@@ -1082,6 +984,7 @@ def create_app(
     app.include_router(dedup_router.router)
     app.include_router(lists_router.router)
     app.include_router(posts_router.router)
+    app.include_router(media_router.router)
 
     return app
 
