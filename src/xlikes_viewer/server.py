@@ -24,6 +24,7 @@ from xlikes_viewer.book_dedup import (
     find_duplicate_book,
     fingerprint_for_ordered_files,
 )
+from xlikes_viewer.context import AppContext
 from xlikes_viewer.db import Database
 from xlikes_viewer.dedup import DedupRunner, VisualDedupRunner
 from xlikes_viewer.gallerydl_config import build_book_import_config, write_gallerydl_config
@@ -1406,6 +1407,33 @@ def create_app(
                 "last_error": s.last_error,
             }
         )
+
+    # All shared state + collaborators are now constructed; gather them into the
+    # AppContext that the extracted routers reach via Depends(get_context).
+    # (Inline handlers above still close over the locals; they migrate to
+    # routers/ group by group, each switching to ctx.)
+    app.state.context = AppContext(
+        library_root=library_root,
+        library_root_resolved=library_root_resolved,
+        cookies_file=cookies_file,
+        gallerydl_config_path=gallerydl_config_path,
+        fav_authors_path=_fav_authors_path,
+        static_dir=static_dir,
+        books_dir=_BOOKS_DIR,
+        db=db,
+        r2_client=r2_client,
+        cdn_proxy=cdn_proxy,
+        timeline_refresher=timeline_refresher,
+        dedup_runner=dedup_runner,
+        visual_dedup_runner=visual_dedup_runner,
+        book_index_runner=book_index_runner,
+        sync_runner=sync_runner,
+        _state=state,
+        state_lock=state_lock,
+        gdl_lock=unliked_lock,
+        me_likes_lock=me_likes_lock,
+        me_likes_state=me_likes_state,
+    )
 
     return app
 
