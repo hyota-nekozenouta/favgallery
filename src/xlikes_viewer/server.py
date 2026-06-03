@@ -26,6 +26,7 @@ from xlikes_viewer.book_dedup import (
 )
 from xlikes_viewer.db import Database, TimelinePost
 from xlikes_viewer.dedup import DedupRunner, VisualDedupRunner
+from xlikes_viewer.keys import r2_key_for_path
 from xlikes_viewer.like import like_tweet
 from xlikes_viewer.paths import portable_root
 from xlikes_viewer.proxy import CdnProxy, is_allowed
@@ -540,7 +541,7 @@ def create_app(
         # json_path == media_path as a placeholder (unused when serving from R2),
         # so target.json_path is unreliable here.
         sidecar = media.with_name(media.name + ".json")
-        rel = media.relative_to(library_root_resolved).as_posix()
+        rel = r2_key_for_path(media, library_root_resolved)
 
         with contextlib.suppress(FileNotFoundError):
             media.unlink()
