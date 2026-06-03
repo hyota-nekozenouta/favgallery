@@ -24,19 +24,19 @@ from xlikes_viewer.book_dedup import (
     find_duplicate_book,
     fingerprint_for_ordered_files,
 )
-from xlikes_viewer.db import Database, TimelinePost
+from xlikes_viewer.db import Database
 from xlikes_viewer.dedup import DedupRunner, VisualDedupRunner
 from xlikes_viewer.gallerydl_config import build_book_import_config, write_gallerydl_config
 from xlikes_viewer.keys import r2_key_for_path
 from xlikes_viewer.like import like_tweet
 from xlikes_viewer.paths import portable_root
+from xlikes_viewer.payloads import _post_payload, _timeline_payload
 from xlikes_viewer.proxy import CdnProxy, is_allowed
 from xlikes_viewer.r2 import R2Client, r2_config_from_env
 from xlikes_viewer.save_one import save_tweet
 from xlikes_viewer.scanner import (
     DEFAULT_LIBRARY,
     Index,
-    Post,
     build_index_from_db,
     ingest_to_db,
 )
@@ -47,7 +47,6 @@ from xlikes_viewer.timeline import (
     fetch_author_media_posts,
     fetch_my_liked_tweet_ids,
 )
-from xlikes_viewer.x_helpers import tweet_url
 
 
 class _ListCreateBody(BaseModel):
@@ -101,97 +100,6 @@ def _write_cookies_from_env(cookies_path: Path) -> None:
 def _ensure_gallerydl_config(config_path: Path, library_root: Path) -> None:
     """Backwards-compatible shim — see gallerydl_config.write_gallerydl_config."""
     write_gallerydl_config(config_path, library_root)
-
-
-def _base_payload(
-    *,
-    tweet_id: str,
-    num: int,
-    media_url: str,
-    thumb_url: str,
-    media_type: str,
-    extension: str,
-    width: int | None,
-    height: int | None,
-    date: str,
-    author_name: str,
-    author_nick: str,
-    content: str,
-    favorite_count: int,
-    view_count: int,
-    sensitive: bool,
-    lang: str,
-    hashtags: tuple[str, ...],
-    extra: dict | None = None,
-) -> dict:
-    payload = {
-        "tweet_id": tweet_id,
-        "num": num,
-        "media_url": media_url,
-        "thumb_url": thumb_url,
-        "media_type": media_type,
-        "extension": extension,
-        "width": width,
-        "height": height,
-        "date": date,
-        "author_name": author_name,
-        "author_nick": author_nick,
-        "content": content,
-        "favorite_count": favorite_count,
-        "view_count": view_count,
-        "sensitive": sensitive,
-        "lang": lang,
-        "hashtags": list(hashtags),
-        "tweet_url": tweet_url(author_name, tweet_id),
-    }
-    if extra:
-        payload.update(extra)
-    return payload
-
-
-def _post_payload(p: Post) -> dict:
-    return _base_payload(
-        tweet_id=p.tweet_id,
-        num=p.num,
-        media_url=f"/api/media/{p.rel_media}",
-        thumb_url=f"/thumb/{p.rel_media}",
-        media_type=p.media_type,
-        extension=p.extension,
-        width=p.width,
-        height=p.height,
-        date=p.date,
-        author_name=p.author_name,
-        author_nick=p.author_nick,
-        content=p.content,
-        favorite_count=p.favorite_count,
-        view_count=p.view_count,
-        sensitive=p.sensitive,
-        lang=p.lang,
-        hashtags=p.hashtags,
-    )
-
-
-def _timeline_payload(p: TimelinePost) -> dict:
-    return _base_payload(
-        tweet_id=p.tweet_id,
-        num=p.num,
-        media_url=f"/api/timeline/proxy?url={p.media_url}",
-        thumb_url=f"/api/timeline/proxy?url={p.thumb_url}",
-        media_type=p.media_type,
-        extension="",
-        width=p.width,
-        height=p.height,
-        date=p.date,
-        author_name=p.author_name,
-        author_nick=p.author_nick,
-        content=p.content,
-        favorite_count=p.favorite_count,
-        view_count=p.view_count,
-        sensitive=False,
-        lang="",
-        hashtags=p.hashtags,
-        extra={"raw_media_url": p.media_url, "author_avatar_url": p.author_avatar_url},
-    )
 
 
 def _make_basic_auth_middleware():
