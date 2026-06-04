@@ -1,7 +1,9 @@
 """Bookshelf endpoints: CRUD, tags/favorites, multipart upload, URL import.
 
-Route registration order is kept identical to the original create_app so path
-matching (e.g. /api/books/{book_id} vs /api/books/tags) is unchanged.
+Literal routes (e.g. /api/books/tags) MUST be registered before the
+parametrized /api/books/{book_id} (int) route. Otherwise FastAPI matches
+/api/books/tags as book_id="tags" and rejects it with 422 (int_parsing)
+before reaching api_book_tags.
 """
 
 from __future__ import annotations
@@ -57,6 +59,12 @@ def api_books(ctx: AppContext = Depends(get_context)) -> JSONResponse:
             for b in items
         ]
     )
+
+
+@router.get("/api/books/tags")
+def api_book_tags(ctx: AppContext = Depends(get_context)) -> JSONResponse:
+    tags = ctx.db.all_book_tags()
+    return JSONResponse({"tags": [{"name": t[0], "count": t[1]} for t in tags]})
 
 
 @router.get("/api/books/{book_id}")
@@ -194,12 +202,6 @@ def api_patch_book(
         raise HTTPException(status_code=404, detail="book not found")
     book = ctx.db.get_book(book_id)
     return JSONResponse({"id": book.id, "title": book.title, "page_count": book.page_count})
-
-
-@router.get("/api/books/tags")
-def api_book_tags(ctx: AppContext = Depends(get_context)) -> JSONResponse:
-    tags = ctx.db.all_book_tags()
-    return JSONResponse({"tags": [{"name": t[0], "count": t[1]} for t in tags]})
 
 
 @router.put("/api/books/{book_id}/tags")
