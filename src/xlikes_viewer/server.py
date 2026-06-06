@@ -23,6 +23,7 @@ from xlikes_viewer.proxy import CdnProxy
 from xlikes_viewer.r2 import R2Client, r2_config_from_env
 from xlikes_viewer.routers import admin as admin_router
 from xlikes_viewer.routers import books as books_router
+from xlikes_viewer.routers import cookies as cookies_router
 from xlikes_viewer.routers import dedup as dedup_router
 from xlikes_viewer.routers import lists as lists_router
 from xlikes_viewer.routers import me as me_router
@@ -43,15 +44,20 @@ from xlikes_viewer.timeline import (
 
 
 def _write_cookies_from_env(cookies_path: Path) -> None:
-    """Write GALLERY_DL_COOKIES env var content to cookies_path if set.
+    """Seed cookies.txt from the GALLERY_DL_COOKIES env var, **once**.
 
     Called at startup so Railway Variables can supply cookies without file
-    transfers or CLI commands.  An empty / unset var is silently ignored so
-    existing cookies.txt files are preserved.
+    transfers or CLI commands.  Seed-once semantics: an empty / unset var is
+    ignored, and an existing cookies.txt is **never overwritten** — so cookies
+    set via the in-app UI (POST /api/cookies, written to the persistent volume)
+    survive a container restart instead of being clobbered by a now-stale env
+    value. The env var only provisions the file on a fresh volume.
     """
     content = os.environ.get("GALLERY_DL_COOKIES", "")
     if not content:
         return
+    if cookies_path.exists():
+        return  # UI-managed / volume cookies win; don't clobber on restart.
     cookies_path.parent.mkdir(parents=True, exist_ok=True)
     cookies_path.write_text(content, encoding="utf-8")
 
@@ -283,6 +289,7 @@ def create_app(
     app.include_router(timeline_router.router)
     app.include_router(me_router.router)
     app.include_router(books_router.router)
+    app.include_router(cookies_router.router)
 
     return app
 

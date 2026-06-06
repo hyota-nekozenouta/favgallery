@@ -333,6 +333,11 @@
       <button id="meSyncBtn" class="w-full bg-rose-700 hover:bg-rose-600 text-white rounded px-2 py-1 text-xs">♥ マイいいね同期</button>
       <div id="meStatus" class="text-zinc-500 text-xs"></div>
     </div>
+    <div class="px-1 pt-2 pb-1 mt-2 text-xs text-zinc-500 uppercase tracking-wider border-t border-zinc-800">X cookies</div>
+    <div class="space-y-1">
+      <div id="cookieStatus" class="text-zinc-500 text-xs">確認中…</div>
+      <button id="cookieSetBtn" class="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded px-2 py-1 text-xs">🔑 cookies を設定 / 更新</button>
+    </div>
   </div>
 
 <script>
@@ -1632,6 +1637,7 @@ $('#optionsBtn').addEventListener('click', (e) => {
   pop.style.top = (rect.bottom + 4 + window.scrollY) + 'px';
   pop.style.left = rect.left + 'px';
   pop.classList.remove('hidden');
+  loadCookieStatus();
 });
 document.addEventListener('click', (e) => {
   const pop = $('#optionsPopover');
@@ -1722,6 +1728,103 @@ async function pollMeSyncStatus() {
     }
   } catch { /* ignore */ }
 }
+
+// --- X cookies management ------------------------------------------
+async function loadCookieStatus() {
+  const el = $('#cookieStatus');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/cookies/status');
+    const d = await r.json();
+    if (d.configured) {
+      const when = d.updated_at ? new Date(d.updated_at * 1000).toLocaleString() : '';
+      el.innerHTML = `✅ cookies 設定済み${d.looks_valid ? '' : '・形式要確認'}`
+        + (when ? `<span class="text-zinc-600"> · ${escapeHtml(when)}</span>` : '');
+    } else {
+      el.textContent = '⚠️ cookies 未設定 — 同期するには設定が必要です';
+    }
+  } catch { el.textContent = '状態を取得できませんでした'; }
+}
+
+function openCookieModal() {
+  document.getElementById('cookieModal')?.remove();
+  const modal = document.createElement('div');
+  modal.id = 'cookieModal';
+  modal.className = 'fixed inset-0 bg-black/80 flex items-center justify-center z-[70] p-4';
+  modal.innerHTML = `
+    <div class="bg-zinc-900 border border-zinc-800 rounded-lg w-full max-w-lg p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <div class="text-sm text-zinc-200 font-medium">X cookies の設定</div>
+        <button id="cookieCloseBtn" class="text-zinc-400 hover:text-white text-xl leading-none">×</button>
+      </div>
+      <p class="text-xs text-zinc-500 leading-relaxed">
+        ブラウザ拡張などで書き出した <code>cookies.txt</code>（Netscape 形式）の中身を貼り付けるか、
+        ファイルを選択してください。保存先は永続ストレージで再デプロイ不要。失効したらここで貼り替えれば復旧します。
+      </p>
+      <textarea id="cookieText" rows="7" spellcheck="false"
+        class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-indigo-500"
+        placeholder="# Netscape HTTP Cookie File&#10;.x.com&#9;TRUE&#9;/&#9;TRUE&#9;...&#9;auth_token&#9;..."></textarea>
+      <div class="flex items-center gap-2">
+        <label class="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded px-2 py-1 text-xs cursor-pointer">
+          ファイルを選択
+          <input id="cookieFile" type="file" accept=".txt,text/plain" class="hidden" />
+        </label>
+        <span id="cookieFileName" class="text-xs text-zinc-500"></span>
+      </div>
+      <div id="cookieMsg" class="text-xs min-h-[1rem]"></div>
+      <div class="flex items-center justify-end gap-2 pt-1">
+        <button id="cookieVerifyBtn" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded px-3 py-1.5 text-xs">接続テスト</button>
+        <button id="cookieSaveBtn" class="bg-indigo-600 hover:bg-indigo-500 text-white rounded px-3 py-1.5 text-xs">保存</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  const close = () => modal.remove();
+  modal.querySelector('#cookieCloseBtn').addEventListener('click', close);
+  modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+  const msg = modal.querySelector('#cookieMsg');
+  const setMsg = (text, kind) => {
+    msg.textContent = text;
+    msg.style.color = kind === 'error' ? '#fca5a5' : (kind === 'ok' ? '#86efac' : '#a1a1aa');
+  };
+
+  modal.querySelector('#cookieFile').addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    modal.querySelector('#cookieFileName').textContent = file.name;
+    const reader = new FileReader();
+    reader.onload = () => { modal.querySelector('#cookieText').value = String(reader.result || ''); };
+    reader.readAsText(file);
+  });
+
+  modal.querySelector('#cookieSaveBtn').addEventListener('click', async () => {
+    const content = modal.querySelector('#cookieText').value;
+    if (!content.trim()) { setMsg('cookies を貼り付けてください', 'error'); return; }
+    setMsg('保存中…');
+    try {
+      const r = await fetch('/api/cookies', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setMsg('✗ ' + (d.detail || '保存に失敗しました'), 'error'); return; }
+      setMsg('✅ 保存しました。接続テストで有効性を確認できます', 'ok');
+      loadCookieStatus();
+    } catch (e) { setMsg('✗ ' + e.message, 'error'); }
+  });
+
+  modal.querySelector('#cookieVerifyBtn').addEventListener('click', async () => {
+    setMsg('接続テスト中…');
+    try {
+      const r = await fetch('/api/cookies/verify', { method: 'POST' });
+      const d = await r.json().catch(() => ({}));
+      setMsg((d.ok ? '✅ ' : '✗ ') + (d.message || ''), d.ok ? 'ok' : 'error');
+    } catch (e) { setMsg('✗ ' + e.message, 'error'); }
+  });
+}
+
+document.getElementById('cookieSetBtn')?.addEventListener('click', openCookieModal);
 
 // --- Timeline last-seen marker ------------------------------------
 async function loadLastSeen() {
