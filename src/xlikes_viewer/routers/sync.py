@@ -9,6 +9,12 @@ from xlikes_viewer.context import AppContext, get_context
 
 router = APIRouter()
 
+# Shown verbatim by the frontend (prefixed "同期エラー: ") when a sync is started
+# before cookies exist. Points at the in-app cookie UI (⚙ → 🔑), which superseded
+# the old GALLERY_DL_COOKIES env-var provisioning. The word "cookies" must stay —
+# the frontend shows it as-is and a test asserts the reason mentions cookies.
+_MSG_NO_COOKIES = "cookies が未設定です。⚙ 設定 → 🔑 から登録してください。"
+
 
 @router.get("/api/sync/status")
 def sync_status(ctx: AppContext = Depends(get_context)) -> JSONResponse:
@@ -32,7 +38,7 @@ def sync_status(ctx: AppContext = Depends(get_context)) -> JSONResponse:
 def sync_start(ctx: AppContext = Depends(get_context)) -> JSONResponse:
     if not ctx.cookies_file.exists():
         return JSONResponse(
-            {"started": False, "reason": "cookies.txt not found — set GALLERY_DL_COOKIES env var"},
+            {"started": False, "reason": _MSG_NO_COOKIES},
             status_code=400,
         )
     ok = ctx.sync_runner.start()
