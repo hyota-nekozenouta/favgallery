@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import os
 import secrets
+import shutil
 import threading
 from pathlib import Path
 
@@ -60,6 +61,26 @@ def _write_cookies_from_env(cookies_path: Path) -> None:
         return  # UI-managed / volume cookies win; don't clobber on restart.
     cookies_path.parent.mkdir(parents=True, exist_ok=True)
     cookies_path.write_text(content, encoding="utf-8")
+
+
+def _migrate_legacy_cookies(old_path: Path, new_path: Path) -> None:
+    """Move a cookies.txt left at the pre-volume-fix location into ``new_path``.
+
+    Earlier builds stored cookies at ``library_root.parent / cookies.txt`` — one
+    level *above* the Railway volume mount (``/data/library``) — so the file sat
+    on ephemeral container storage and was wiped on every redeploy, silently
+    dropping the X-sync auth. The cookie now lives inside ``library_root`` (on
+    the volume); move any legacy file so the transition loses nothing. Best
+    effort: a cross-device/permission error just means the user re-sets the
+    cookie once. Skipped when ``new_path`` already exists (the volume cookie wins).
+    """
+    if new_path.exists() or not old_path.exists():
+        return
+    try:
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(old_path), str(new_path))
+    except OSError:
+        pass
 
 
 def _ensure_gallerydl_config(config_path: Path, library_root: Path) -> None:
@@ -135,7 +156,12 @@ def create_app(
     app.state.library_root = library_root
 
     db = Database(library_root / "xlikes.sqlite")
-    cookies_file = library_root.parent / "cookies.txt"  # data/cookies.txt
+    # cookies.txt lives INSIDE library_root (the Railway volume mount at
+    # ARCHIVE_LIBRARY_ROOT), next to the DB, so the UI-set cookie survives
+    # redeploys. The old location (library_root.parent) sat above the volume on
+    # ephemeral container storage and was wiped on every redeploy.
+    cookies_file = library_root / "cookies.txt"
+    _migrate_legacy_cookies(library_root.parent / "cookies.txt", cookies_file)
     _write_cookies_from_env(cookies_file)
 
     # Allow tests / callers to inject an R2 client; otherwise build from env.

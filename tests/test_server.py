@@ -456,7 +456,7 @@ def test_gallery_dl_cookies_env_writes_cookies_file(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path
 ) -> None:
     """GALLERY_DL_COOKIES env var content must be written to cookies.txt at startup."""
-    cookies_path = fake_library.parent / "cookies.txt"
+    cookies_path = fake_library / "cookies.txt"
     assert not cookies_path.exists()
     cookie_content = "# Netscape HTTP Cookie File\nexample.com\tFALSE\t/\tFALSE\t0\tsession\tabc123\n"
     monkeypatch.setenv("GALLERY_DL_COOKIES", cookie_content)
@@ -470,7 +470,7 @@ def test_gallery_dl_cookies_env_empty_does_not_overwrite(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path
 ) -> None:
     """Unset / empty GALLERY_DL_COOKIES must not touch existing cookies.txt."""
-    cookies_path = fake_library.parent / "cookies.txt"
+    cookies_path = fake_library / "cookies.txt"
     original = "# existing cookies\n"
     cookies_path.write_text(original, encoding="utf-8")
     monkeypatch.delenv("GALLERY_DL_COOKIES", raising=False)
@@ -484,7 +484,7 @@ def test_sync_start_returns_400_when_cookies_missing(
 ) -> None:
     """POST /api/sync/start must return 400 when cookies.txt does not exist."""
     monkeypatch.delenv("GALLERY_DL_COOKIES", raising=False)
-    cookies_path = fake_library.parent / "cookies.txt"
+    cookies_path = fake_library / "cookies.txt"
     assert not cookies_path.exists()
     app = create_app(library_root=fake_library, scan_in_background=False)
     client = TestClient(app)
@@ -499,7 +499,7 @@ def test_sync_start_not_400_when_cookies_present(
 ) -> None:
     """POST /api/sync/start must not return 400 when cookies.txt exists."""
     monkeypatch.delenv("GALLERY_DL_COOKIES", raising=False)
-    cookies_path = fake_library.parent / "cookies.txt"
+    cookies_path = fake_library / "cookies.txt"
     cookies_path.write_text("# cookies\n", encoding="utf-8")
     app = create_app(library_root=fake_library, scan_in_background=False)
     client = TestClient(app)
@@ -507,6 +507,41 @@ def test_sync_start_not_400_when_cookies_present(
     # cookies.txt present → 400 must NOT be returned
     # gallery-dl is always available so sync starts (200) or fails with 409 if already running
     assert r.status_code != 400
+
+
+@pytest.mark.integration
+def test_cookies_file_lives_inside_library_root(fake_library: Path) -> None:
+    """cookies.txt must live INSIDE library_root (the Railway volume mount),
+    not one level above it.
+
+    Regression: the Railway volume is mounted at ``/data/library`` (==
+    ARCHIVE_LIBRARY_ROOT), so a cookies file at ``library_root.parent``
+    (``/data``) sat on ephemeral container storage and was wiped on every
+    redeploy — silently dropping the X-sync auth. Keeping it next to the DB
+    (which demonstrably persists) makes it survive redeploys regardless of
+    where the volume happens to be mounted.
+    """
+    app = create_app(library_root=fake_library, scan_in_background=False)
+    assert app.state.context.cookies_file == fake_library / "cookies.txt"
+
+
+@pytest.mark.integration
+def test_legacy_cookies_migrated_into_library_root(
+    monkeypatch: pytest.MonkeyPatch, fake_library: Path
+) -> None:
+    """A cookies.txt left at the old (pre-volume-fix) location is moved into
+    library_root at startup so the transition loses no cookie."""
+    monkeypatch.delenv("GALLERY_DL_COOKIES", raising=False)
+    legacy = fake_library.parent / "cookies.txt"
+    new_path = fake_library / "cookies.txt"
+    legacy.write_text(
+        "# legacy\n.x.com\tTRUE\t/\tTRUE\t0\tauth_token\tTOK\n", encoding="utf-8"
+    )
+    assert not new_path.exists()
+    create_app(library_root=fake_library, scan_in_background=False)
+    assert new_path.exists(), "legacy cookie must be migrated into library_root"
+    assert "auth_token" in new_path.read_text(encoding="utf-8")
+    assert not legacy.exists(), "legacy cookie must be moved, not left behind"
 
 
 # ---------------------------------------------------------------------------
@@ -529,7 +564,7 @@ def test_ensure_gallerydl_config_written_in_nonportable_env(
     cfg = json.loads(config_path.read_text(encoding="utf-8"))
     assert cfg["downloader"]["ffmpeg-location"] == "ffmpeg"
     cookies_in_cfg = cfg["extractor"]["twitter"]["cookies"]
-    expected_cookies = str(fake_library.parent / "cookies.txt").replace("\\", "/")
+    expected_cookies = str(fake_library / "cookies.txt").replace("\\", "/")
     assert cookies_in_cfg == expected_cookies
     base_dir = cfg["extractor"]["base-directory"]
     assert base_dir.endswith("/")

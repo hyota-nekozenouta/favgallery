@@ -145,12 +145,17 @@ railway run --service archive rsync -avz ./data/library/ /data/library/
 
 gallery-dl による X(Twitter) アクセスには `cookies.txt` が必要。
 
-**推奨（Railway）**: `GALLERY_DL_COOKIES` 環境変数に cookies.txt の中身をそのまま貼り付ける。
-アプリ起動時に内容が `cookies.txt` へ書き出されるため、ファイル転送や CLI は不要。
-空 / 未設定なら既存の `cookies.txt` をそのまま使う（上書きしない）。
+**保存場所**: `cookies.txt` は `ARCHIVE_LIBRARY_ROOT` 直下（例: `/data/library/cookies.txt`）に
+DB と並んで置かれる。**ボリューム内なので再デプロイしても消えない**。
+（旧バージョンは `library_root` の一つ上＝`/data/cookies.txt` に置いており、ボリュームの外だったため
+再デプロイのたびに消えていた。起動時に旧パスへ残っていれば新パスへ自動移行する。）
 
-**代替**: `cookies.txt` をボリューム内に直接配置する。
-現状の gallery-dl 設定パス: `/data/cookies.txt`（ポータブルレイアウト外の場合）
+**推奨（Railway）**: アプリ内 UI（⚙ 設定 → 🔑 cookies を設定 / 更新）で貼り付ける。
+ボリュームに永続するので、失効しても再デプロイ不要でこの画面から貼り替えれば復旧する。
+
+**代替（初期プロビジョニング）**: `GALLERY_DL_COOKIES` 環境変数に cookies.txt の中身を貼り付ける。
+起動時、`cookies.txt` が**無いときだけ**この内容で書き出される（既存は上書きしない）。
+一度 UI で設定すれば以降は env を更新しなくてよい。
 
 ---
 

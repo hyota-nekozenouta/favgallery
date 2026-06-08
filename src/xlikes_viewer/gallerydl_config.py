@@ -22,13 +22,15 @@ def _fwd(p: Path) -> str:
 
 def build_sync_config(library_root: Path, ffmpeg_location: str) -> dict:
     """Build the gallery-dl config dict for the X likes sync (pure)."""
-    data_dir = library_root.parent
     return {
         "extractor": {
             "base-directory": _fwd(library_root) + "/",
             "archive": _fwd(library_root / "archive.sqlite"),
             "twitter": {
-                "cookies": _fwd(data_dir / "cookies.txt"),
+                # cookies.txt lives INSIDE library_root (the Railway volume mount),
+                # next to the DB, so it survives redeploys. Must match the path
+                # computed in server.create_app (ctx.cookies_file).
+                "cookies": _fwd(library_root / "cookies.txt"),
                 "videos": True,
                 "retweets": False,
                 "text-tweets": False,

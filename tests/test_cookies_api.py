@@ -32,8 +32,8 @@ def client(fake_library: Path) -> TestClient:
 
 
 def _cookies_path(fake_library: Path) -> Path:
-    # server.py: cookies_file = library_root.parent / "cookies.txt"
-    return fake_library.parent / "cookies.txt"
+    # server.py: cookies_file = library_root / "cookies.txt" (inside the volume)
+    return fake_library / "cookies.txt"
 
 
 # --- GET /api/cookies/status -------------------------------------------------
