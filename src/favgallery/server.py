@@ -166,20 +166,16 @@ def _make_basic_auth_middleware():
     return basic_auth_middleware
 
 
-def create_app(
-    library_root: Path = DEFAULT_LIBRARY,
-    *,
-    scan_in_background: bool = True,
-    r2_client: R2Client | None = None,
-) -> FastAPI:
-    app = FastAPI(title="FavGallery", version=APP_VERSION)
-    app.middleware("http")(_make_basic_auth_middleware())
+def _register_http_shell_middleware(app: FastAPI) -> None:
+    """Version stamp + /static cache policy (Phase 6 で create_app から分離).
 
-    # Outermost middleware (last added runs first): version-stamp every response,
-    # including the auth middleware's 401s. /static のキャッシュ方針もここで一元化:
-    # - style.css は ?v=__APP_VERSION__ 付きで参照されるため immutable 長期キャッシュ可
-    # - それ以外 (将来の lib/*.js 含む) は no-cache — ES module の深い import は
-    #   ?v= を運べず、スマホ古キャッシュ事故 (v0.2.3) を構造的に再発させないため
+    Outermost middleware (last added runs first): version-stamp every response,
+    including the auth middleware's 401s. /static のキャッシュ方針:
+    - style.css は ?v=__APP_VERSION__ 付き参照のため immutable 長期キャッシュ可
+    - それ以外 (lib/*.js 含む) は no-cache — ES module の深い import は ?v= を
+      運べず、スマホ古キャッシュ事故 (v0.2.3) を構造的に再発させないため
+    """
+
     @app.middleware("http")
     async def add_version_header(request: Request, call_next):
         response = await call_next(request)
@@ -194,6 +190,48 @@ def create_app(
             else:
                 response.headers["Cache-Control"] = "no-cache"
         return response
+
+
+def _register_shell_routes(app: FastAPI, static_dir: Path) -> None:
+    """SPA シェル配信 + 遠隔診断口 + /static mount (Phase 6 で create_app から分離)."""
+
+    @app.get("/", response_class=HTMLResponse)
+    def root() -> HTMLResponse:
+        html = (static_dir / "index.html").read_text(encoding="utf-8")
+        # 端末側に表示中バージョンを出す (スマホ古キャッシュ診断 / 2026-06-10)
+        html = html.replace("__APP_VERSION__", APP_VERSION)
+        # no-cache: SPA シェルを端末キャッシュさせない。デプロイ後にスマホが
+        # 古い JS を使い回し「直したのに変わらない」が起きた (2026-06-10)。
+        return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+    @app.post("/api/client-log")
+    async def client_log(request: Request) -> Response:
+        """端末 (主にスマホ) の JS エラーを受けてサーバーログに出す遠隔診断口。
+
+        DevTools を開けない端末の「押しても何も起きない」を Railway logs から
+        特定するため (2026-06-10)。内容は記録するだけ — 解析も保存もしない。
+        """
+        try:
+            body = (await request.body())[:2000].decode("utf-8", errors="replace")
+        except Exception:
+            body = "<unreadable>"
+        logging.getLogger("favgallery.client").warning("client-log: %s", body)
+        return Response(status_code=204)
+
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+
+def create_app(
+    library_root: Path = DEFAULT_LIBRARY,
+    *,
+    scan_in_background: bool = True,
+    r2_client: R2Client | None = None,
+) -> FastAPI:
+    app = FastAPI(title="FavGallery", version=APP_VERSION)
+    app.middleware("http")(_make_basic_auth_middleware())
+
+    _register_http_shell_middleware(app)
 
     # Index is built from DB (persistent). On first run or after sync,
     # local JSON sidecars are ingested into the DB. The frontend polls
@@ -284,31 +322,7 @@ def create_app(
     # returns immediately; idempotent (only un-indexed books are processed).
     book_index_runner.start()
 
-    @app.get("/", response_class=HTMLResponse)
-    def root() -> HTMLResponse:
-        html = (static_dir / "index.html").read_text(encoding="utf-8")
-        # 端末側に表示中バージョンを出す (スマホ古キャッシュ診断 / 2026-06-10)
-        html = html.replace("__APP_VERSION__", APP_VERSION)
-        # no-cache: SPA シェルを端末キャッシュさせない。デプロイ後にスマホが
-        # 古い JS を使い回し「直したのに変わらない」が起きた (2026-06-10)。
-        return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
-
-    @app.post("/api/client-log")
-    async def client_log(request: Request) -> Response:
-        """端末 (主にスマホ) の JS エラーを受けてサーバーログに出す遠隔診断口。
-
-        DevTools を開けない端末の「押しても何も起きない」を Railway logs から
-        特定するため (2026-06-10)。内容は記録するだけ — 解析も保存もしない。
-        """
-        try:
-            body = (await request.body())[:2000].decode("utf-8", errors="replace")
-        except Exception:
-            body = "<unreadable>"
-        logging.getLogger("favgallery.client").warning("client-log: %s", body)
-        return Response(status_code=204)
-
-    if static_dir.exists():
-        app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    _register_shell_routes(app, static_dir)
 
     def _after_sync() -> None:
         """Settle sync results into the DB/index (must run before added is counted)."""
