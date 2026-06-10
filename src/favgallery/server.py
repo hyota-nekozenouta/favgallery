@@ -176,11 +176,20 @@ def create_app(
     app.middleware("http")(_make_basic_auth_middleware())
 
     # Outermost middleware (last added runs first): version-stamp every response,
-    # including the auth middleware's 401s.
+    # including the auth middleware's 401s. /static のキャッシュ方針もここで一元化:
+    # - style.css は ?v=__APP_VERSION__ 付きで参照されるため immutable 長期キャッシュ可
+    # - それ以外 (将来の lib/*.js 含む) は no-cache — ES module の深い import は
+    #   ?v= を運べず、スマホ古キャッシュ事故 (v0.2.3) を構造的に再発させないため
     @app.middleware("http")
     async def add_version_header(request: Request, call_next):
         response = await call_next(request)
         response.headers["X-App-Version"] = APP_VERSION
+        path = request.url.path
+        if path.startswith("/static/"):
+            if path == "/static/style.css":
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            else:
+                response.headers["Cache-Control"] = "no-cache"
         return response
 
     # Index is built from DB (persistent). On first run or after sync,

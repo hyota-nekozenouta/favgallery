@@ -731,3 +731,22 @@ def test_media_and_thumb_etags_are_strong(client: TestClient) -> None:
     assert etag and not etag.startswith("W/")
     r304 = client.get(media_url, headers={"If-None-Match": etag})
     assert r304.status_code == 304
+
+
+@pytest.mark.integration
+def test_prebuilt_css_served_with_long_cache(client: TestClient) -> None:
+    """Phase 3: 事前生成 CSS は ?v= 付き参照なので immutable 長期キャッシュ。
+    それ以外の /static (将来の lib/*.js 含む) は no-cache (v0.2.3 の教訓:
+    ES module の深い import は ?v= を運べない)。"""
+    r = client.get("/static/style.css")
+    assert r.status_code == 200
+    assert r.headers.get("Cache-Control") == "public, max-age=31536000, immutable"
+
+
+@pytest.mark.integration
+def test_index_references_versioned_stylesheet(client: TestClient) -> None:
+    from favgallery.server import APP_VERSION
+
+    html = client.get("/").text
+    assert f"/static/style.css?v={APP_VERSION}" in html
+    assert "cdn.tailwindcss.com" not in html

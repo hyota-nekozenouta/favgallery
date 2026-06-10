@@ -18,6 +18,15 @@ uv run pytest          # テスト
 PYTHONPATH=src uv run uvicorn favgallery.server:app --reload  # ローカル起動
 ```
 
+## CSS の再生成（Tailwind 事前生成 / Phase 3）
+
+Tailwind は CDN ではなく事前生成 CSS（`src/favgallery/static/style.css`・コミット済み）。
+クラスを追加・変更したら 1 コマンドで再生成してコミットする:
+
+```bash
+npx --yes tailwindcss@3.4.17 -c tailwind.config.js -i scripts/tailwind.input.css -o src/favgallery/static/style.css --minify
+```
+
 ## デプロイ
 
 Railway + Cloudflare での公開手順は [DEPLOY.md](DEPLOY.md) を参照。
