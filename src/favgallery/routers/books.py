@@ -44,7 +44,7 @@ def _natural_key(name: str) -> list:
 def api_books(ctx: AppContext = Depends(get_context)) -> JSONResponse:
     items = ctx.db.books()
     fav_ids = ctx.db.book_favorite_ids()
-    all_tags = {b.id: ctx.db.book_tags(b.id) for b in items}
+    all_tags = ctx.db.book_tags_bulk()
     return JSONResponse(
         [
             {
@@ -54,7 +54,7 @@ def api_books(ctx: AppContext = Depends(get_context)) -> JSONResponse:
                 "page_count": b.page_count,
                 "created_at": b.created_at,
                 "is_favorite": b.id in fav_ids,
-                "tags": all_tags[b.id],
+                "tags": all_tags.get(b.id, []),
             }
             for b in items
         ]

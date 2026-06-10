@@ -219,3 +219,17 @@ def test_timeline_media_type_index_exists(tmp_path: Path) -> None:
         ).fetchall()
     }
     assert "timeline_posts_media_type" in names
+
+
+def test_book_tags_bulk_groups_by_book(tmp_path: Path) -> None:
+    """N+1 根治: /api/books 用の一括タグ取得 (perf Phase 1)。"""
+    db = Database(tmp_path / "p.sqlite")
+    b1 = db.create_book("one", None, 1)
+    b2 = db.create_book("two", None, 1)
+    b3 = db.create_book("three", None, 1)
+    db.set_book_tags(b1.id, ["a", "b"])
+    db.set_book_tags(b2.id, ["b"])
+    bulk = db.book_tags_bulk()
+    assert bulk[b1.id] == ["a", "b"]
+    assert bulk[b2.id] == ["b"]
+    assert bulk.get(b3.id, []) == []

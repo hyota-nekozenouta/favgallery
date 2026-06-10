@@ -759,6 +759,19 @@ class Database:
             ).fetchall()
         return [r[0] for r in rows]
 
+    def book_tags_bulk(self) -> dict[int, list[str]]:
+        """All book tags in one query — /api/books was N+1 (one book_tags()
+        call per book / 2026-06-10 perf Phase 1). Books without tags are
+        simply absent; callers use .get(id, [])."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT book_id, tag FROM book_tags ORDER BY book_id, tag"
+            ).fetchall()
+        result: dict[int, list[str]] = {}
+        for book_id, tag in rows:
+            result.setdefault(book_id, []).append(tag)
+        return result
+
     def all_book_tags(self) -> list[tuple[str, int]]:
         sql = "SELECT tag, COUNT(*) as cnt FROM book_tags GROUP BY tag ORDER BY cnt DESC, tag"
         with self._lock:
