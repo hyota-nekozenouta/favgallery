@@ -131,9 +131,15 @@ class AppContext:
         return target
 
     @staticmethod
-    def weak_etag(*parts: object) -> str:
+    def strong_etag(*parts: object) -> str:
+        """Strong ETag for immutable content (media / thumbs).
+
+        Was weak (``W/"…"``) which forces conditional revalidation semantics;
+        strong lets browsers cache harder (2026-06-10 perf Phase 1). Old weak
+        values held by clients miss once → one full refetch, then re-converge.
+        """
         raw = "|".join(str(p) for p in parts)
-        return 'W/"' + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16] + '"'
+        return '"' + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16] + '"'
 
 
 def get_context(request: Request) -> AppContext:

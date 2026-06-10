@@ -718,3 +718,16 @@ def test_like_and_save_records_my_like(
     assert r.json()["liked"] is True
     db = client.app.state.db  # type: ignore[attr-defined]
     assert "12345" in db.my_likes_ids()
+
+
+@pytest.mark.integration
+def test_media_and_thumb_etags_are_strong(client: TestClient) -> None:
+    """immutable メディアの ETag は strong (W/ なし) — ブラウザキャッシュ強化
+    (perf Phase 1 / 2026-06-10)。304 round-trip も維持。"""
+    posts = client.get("/api/posts").json()["items"]
+    media_url = posts[0]["media_url"]
+    r = client.get(media_url)
+    etag = r.headers.get("ETag", "")
+    assert etag and not etag.startswith("W/")
+    r304 = client.get(media_url, headers={"If-None-Match": etag})
+    assert r304.status_code == 304

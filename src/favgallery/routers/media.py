@@ -17,7 +17,7 @@ async def api_media(
 ) -> Response:
     """Serve media from R2 when configured, otherwise from the local library."""
     ctx.validate_rel_path(rel_path)
-    etag = ctx.weak_etag("media", rel_path)
+    etag = ctx.strong_etag("media", rel_path)
     # rel_path uniquely identifies immutable content, so the If-None-Match
     # short-circuit needs no R2/disk read at all.
     if request.headers.get("if-none-match") == etag:
@@ -60,7 +60,7 @@ def thumb(
     ctx.validate_rel_path(rel_path)
     # Thumbnail bytes are deterministic for (rel_path, size) since the source
     # page is immutable; include size so different ?size= values don't collide.
-    etag = ctx.weak_etag("thumb", rel_path, size)
+    etag = ctx.strong_etag("thumb", rel_path, size)
     cache_headers = {"Cache-Control": ctx.immutable_cache, "ETag": etag}
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers=cache_headers)
