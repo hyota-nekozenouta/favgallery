@@ -81,3 +81,41 @@ def test_delete_list_cascades_items(client: TestClient) -> None:
     assert rd.json()["deleted"] is True
     r = client.get("/api/posts/lists", params={"tweet_id": "1001", "num": 1})
     assert r.json()["list_ids"] == []
+
+
+# --- listed-keys cache invalidation (perf Phase 1 / 2026-06-10) ---------------
+
+
+def _first_post(client: TestClient) -> dict:
+    return client.get("/api/posts?limit=1").json()["items"][0]
+
+
+def _in_any_list(client: TestClient, tweet_id: str, num: int) -> bool:
+    items = client.get("/api/posts?limit=60").json()["items"]
+    return next(
+        i["in_any_list"] for i in items if i["tweet_id"] == tweet_id and i["num"] == num
+    )
+
+
+@pytest.mark.integration
+def test_in_any_list_reflects_add_and_remove(client: TestClient) -> None:
+    """listed keys はキャッシュされるが、リスト操作で即時無効化されること。"""
+    p = _first_post(client)
+    tid, num = p["tweet_id"], p["num"]
+    lid = client.post("/api/lists", json={"name": "cachecheck"}).json()["id"]
+    assert _in_any_list(client, tid, num) is False  # キャッシュを温める
+    client.post(f"/api/lists/{lid}/items", json={"tweet_id": tid, "num": num})
+    assert _in_any_list(client, tid, num) is True  # add で無効化→再計算
+    client.delete(f"/api/lists/{lid}/items/{tid}/{num}")
+    assert _in_any_list(client, tid, num) is False  # remove で無効化
+
+
+@pytest.mark.integration
+def test_in_any_list_reflects_list_deletion(client: TestClient) -> None:
+    p = _first_post(client)
+    tid, num = p["tweet_id"], p["num"]
+    lid = client.post("/api/lists", json={"name": "delcheck"}).json()["id"]
+    client.post(f"/api/lists/{lid}/items", json={"tweet_id": tid, "num": num})
+    assert _in_any_list(client, tid, num) is True
+    client.delete(f"/api/lists/{lid}")
+    assert _in_any_list(client, tid, num) is False  # リスト削除で無効化

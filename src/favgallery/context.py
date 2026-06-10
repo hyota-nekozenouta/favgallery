@@ -84,6 +84,24 @@ class AppContext:
         self.set_index(idx)
         return idx
 
+    # --- listed-keys cache (perf Phase 1 / 2026-06-10) -----------------------
+    def get_listed_keys(self) -> set[tuple[str, int]]:
+        """Cached list-membership keys for /api/posts ``in_any_list``.
+
+        Was a full ``list_items`` table read on EVERY /api/posts request.
+        Must be invalidated by every mutation that changes membership:
+        list item add/remove, list deletion, post deletion."""
+        with self.state_lock:
+            cached = self._state.get("listed_keys")
+            if cached is None:
+                cached = self.db.all_listed_post_keys()
+                self._state["listed_keys"] = cached
+            return cached  # type: ignore[return-value]
+
+    def invalidate_listed_keys(self) -> None:
+        with self.state_lock:
+            self._state.pop("listed_keys", None)
+
     def after_sync(self) -> None:
         """Refresh the index and auto-run dedup after a successful sync."""
         self.refresh_index()

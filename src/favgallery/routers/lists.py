@@ -46,6 +46,7 @@ def lists_create(body: _ListCreateBody, ctx: AppContext = Depends(get_context)) 
 def lists_delete(list_id: int, ctx: AppContext = Depends(get_context)) -> JSONResponse:
     if not ctx.db.delete_list(list_id):
         raise HTTPException(status_code=404, detail="not found")
+    ctx.invalidate_listed_keys()
     return JSONResponse({"deleted": True})
 
 
@@ -56,6 +57,7 @@ def lists_add_item(
     if not body.tweet_id or body.num <= 0:
         raise HTTPException(status_code=400, detail="tweet_id and num required")
     added = ctx.db.add_item(list_id, body.tweet_id, body.num)
+    ctx.invalidate_listed_keys()
     return JSONResponse({"added": added})
 
 
@@ -64,6 +66,7 @@ def lists_remove_item(
     list_id: int, tweet_id: str, num: int, ctx: AppContext = Depends(get_context)
 ) -> JSONResponse:
     removed = ctx.db.remove_item(list_id, tweet_id, num)
+    ctx.invalidate_listed_keys()
     return JSONResponse({"removed": removed})
 
 

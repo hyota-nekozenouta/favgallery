@@ -61,7 +61,7 @@ def api_posts(
         filtered = [p for p in filtered if (p.tweet_id, p.num) in keys]
     total = len(filtered)
     page = filtered[offset : offset + limit]
-    listed_keys = ctx.db.all_listed_post_keys()
+    listed_keys = ctx.get_listed_keys()
     items = [_post_payload(p) for p in page]
     for item, p in zip(items, page, strict=False):
         item["in_any_list"] = (p.tweet_id, p.num) in listed_keys
@@ -186,6 +186,7 @@ def delete_post(tweet_id: str, num: int, ctx: AppContext = Depends(get_context))
     # not re-download this tweet's media.
     ctx.db.delete_post(tweet_id, num)
     ctx.db.remove_item_from_all_lists(tweet_id, num)
+    ctx.invalidate_listed_keys()
     ctx.db.forget_hash(rel)
     ctx.refresh_index()
     return JSONResponse({"deleted": True})
