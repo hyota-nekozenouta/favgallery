@@ -14,6 +14,7 @@ validity) so secrets can't leak back out.
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import tempfile
 
@@ -26,6 +27,10 @@ from favgallery.gdl_errors import is_auth_failure
 from favgallery.timeline import fetch_my_liked_tweet_ids
 
 router = APIRouter()
+
+# 結果をサーバーログにも出す: スマホ側の見落とし/表示不具合があっても
+# Railway logs から保存・verify の実結果を追跡できる (2026-06-10 遠隔診断)
+_log = logging.getLogger("favgallery.cookies")
 
 # User-facing messages (kept as constants so the route bodies stay readable and
 # under the line-length limit, and so the wording lives in one place).
@@ -122,6 +127,7 @@ def cookies_set(body: _CookiesBody, ctx: AppContext = Depends(get_context)) -> J
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         return JSONResponse({"detail": f"保存に失敗しました: {exc}"}, status_code=500)
+    _log.info("cookies saved (size=%d)", len(normalised))
     return JSONResponse(_status_payload(ctx))
 
 
@@ -144,6 +150,7 @@ def cookies_verify(ctx: AppContext = Depends(get_context)) -> JSONResponse:
             {"ok": False, "auth_error": False, "message": _MSG_NO_USERNAME}
         )
     if not ctx.gdl_lock.acquire(timeout=_GDL_LOCK_TIMEOUT_S):
+        _log.info("verify result: busy (gdl_lock held)")
         return JSONResponse({"ok": False, "auth_error": False, "message": _MSG_BUSY})
     try:
         fetch_my_liked_tweet_ids(
@@ -152,15 +159,19 @@ def cookies_verify(ctx: AppContext = Depends(get_context)) -> JSONResponse:
     except Exception as exc:
         text = f"{type(exc).__name__}: {exc}".lower()
         if any(token in text for token in _RATE_LIMIT_TOKENS):
+            _log.info("verify result: rate-limited (%s)", text[:200])
             return JSONResponse(
                 {"ok": False, "auth_error": False, "message": _MSG_RATE_LIMITED}
             )
         if is_auth_failure(exc):
+            _log.info("verify result: auth failure (%s)", text[:200])
             return JSONResponse(
                 {"ok": False, "auth_error": True, "message": _MSG_AUTH_FAIL}
             )
         msg = f"確認に失敗しました: {type(exc).__name__}: {exc}"
+        _log.info("verify result: error (%s)", text[:200])
         return JSONResponse({"ok": False, "auth_error": False, "message": msg})
     finally:
         ctx.gdl_lock.release()
+    _log.info("verify result: ok")
     return JSONResponse({"ok": True, "auth_error": False, "message": _MSG_OK})

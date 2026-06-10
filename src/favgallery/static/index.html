@@ -1879,10 +1879,22 @@ function openCookieModal() {
         body: JSON.stringify({ content }),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) { setMsg('✗ ' + (d.detail || '保存に失敗しました'), 'error'); return; }
+      if (!r.ok) {
+        setMsg('✗ ' + (d.detail || '保存に失敗しました'), 'error');
+        showNotice('cookies の保存に失敗: ' + (d.detail || ''), { kind: 'error' });
+        return;
+      }
       setMsg('✅ 保存しました。接続テストで有効性を確認できます', 'ok');
+      // モーダル内の小さい結果行はスマホで見落とされる — 上部バナーでも通知し、
+      // 冒頭の保存状態行も即更新する (2026-06-10 「押しても何も起きない」誤認)
+      showNotice('✅ cookies を保存しました', { kind: 'info' });
+      const cur = modal.querySelector('#cookieCurStatus');
+      if (cur) { cur.textContent = '✅ サーバーに cookies 保存済み（たった今）'; cur.style.color = '#86efac'; }
       loadCookieStatus();
-    } catch (e) { setMsg('✗ ' + e.message, 'error'); }
+    } catch (e) {
+      setMsg('✗ ' + e.message, 'error');
+      showNotice('cookies の保存に失敗: ' + e.message, { kind: 'error' });
+    }
   });
 
   modal.querySelector('#cookieVerifyBtn').addEventListener('click', async (e) => {
@@ -1897,6 +1909,8 @@ function openCookieModal() {
       const r = await fetch('/api/cookies/verify', { method: 'POST', signal: ctrl.signal });
       const d = await r.json().catch(() => ({}));
       setMsg((d.ok ? '✅ ' : '✗ ') + (d.message || ''), d.ok ? 'ok' : 'error');
+      // スマホで見落とされない位置 (上部バナー) にも同じ結果を出す (2026-06-10)
+      showNotice('接続テスト: ' + (d.ok ? '✅ ' : '') + (d.message || ''), { kind: d.ok ? 'info' : 'error' });
     } catch (err) {
       setMsg(err.name === 'AbortError'
         ? '✗ 時間切れ: サーバーの応答がありません。少し待ってから再試行してください'

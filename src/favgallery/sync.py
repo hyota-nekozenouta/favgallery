@@ -287,6 +287,11 @@ class SyncRunner:
             auth = detect_auth_failure(list(self.state.log_lines))
             if auth and not err:
                 err = AUTH_FAILURE_MESSAGE
+            # Railway logs から同期の実結果を追跡できるようにする (2026-06-10 遠隔診断)
+            logging.getLogger(__name__).info(
+                "sync finished: rc=%s added=%s auth_error=%s err=%s",
+                rc, added, auth, (err or "")[:200],
+            )
             with self._lock:
                 self.state.running = False
                 self.state.finished_at = time()
