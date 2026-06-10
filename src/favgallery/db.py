@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS timeline_posts (
     PRIMARY KEY (tweet_id, num)
 );
 CREATE INDEX IF NOT EXISTS timeline_posts_date ON timeline_posts(date DESC);
+CREATE INDEX IF NOT EXISTS timeline_posts_media_type ON timeline_posts(media_type);
 
 CREATE TABLE IF NOT EXISTS media_hashes (
     rel_path TEXT PRIMARY KEY,
@@ -206,6 +207,13 @@ class Database:
             isolation_level=None,  # autocommit; use explicit transactions below
         )
         self._conn.execute("PRAGMA foreign_keys = ON")
+        # WAL: 読み書き並行性 + クラッシュ耐性 (2026-06-10 perf Phase 1)。
+        # synchronous=NORMAL は WAL とセットで安全な高速化。busy_timeout で
+        # ロック競合時に即エラーせず最大 5 秒待つ。
+        # 注意: volume 上に xlikes.sqlite-wal / -shm が増える (バックアップは 3 点)。
+        self._conn.execute("PRAGMA journal_mode = WAL")
+        self._conn.execute("PRAGMA synchronous = NORMAL")
+        self._conn.execute("PRAGMA busy_timeout = 5000")
         self._conn.executescript(SCHEMA)
         self._migrate()
 

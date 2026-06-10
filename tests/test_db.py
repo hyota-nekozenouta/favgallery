@@ -197,3 +197,25 @@ def test_timeline_listed_newest_first(db: Database) -> None:
     db.upsert_timeline_post(newer)
     _, posts = db.list_timeline_posts(limit=10, offset=0)
     assert posts[0].tweet_id == "2"
+
+
+# --- Pragmas (Phase 1 / 2026-06-10 perf) -------------------------------------
+
+
+def test_wal_mode_and_pragmas_enabled(tmp_path: Path) -> None:
+    """WAL + NORMAL + busy_timeout: 並行読み書きと再起動耐性のため (perf Phase 1)。"""
+    db = Database(tmp_path / "p.sqlite")
+    assert db._conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    assert db._conn.execute("PRAGMA synchronous").fetchone()[0] == 1  # NORMAL
+    assert db._conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+
+
+def test_timeline_media_type_index_exists(tmp_path: Path) -> None:
+    """/api/timeline?media_type= の SQL フィルタ用インデックス (perf Phase 1)。"""
+    db = Database(tmp_path / "p.sqlite")
+    names = {
+        r[0] for r in db._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index'"
+        ).fetchall()
+    }
+    assert "timeline_posts_media_type" in names
