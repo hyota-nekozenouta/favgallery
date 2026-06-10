@@ -299,9 +299,18 @@ def create_app(
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
     def _after_sync() -> None:
-        """Refresh index and auto-run dedup after a successful sync."""
+        """Settle sync results into the DB/index (must run before added is counted)."""
         _refresh_index()
+
+    def _on_new_items(added: int) -> None:
+        """Run dedup ONLY when the sync actually added items.
+
+        以前は毎同期 (=毎ページロード) で全ライブラリの SHA-256 + imagehash
+        走査が無条件に走っていた (20〜90 秒 CPU / 2026-06-10 Phase 2)。
+        visual dedup はフロントが毎回 POST していたものをサーバー所有に移管。
+        """
         dedup_runner.start()
+        visual_dedup_runner.start()
 
     # SyncRunner shares the same serialization lock so prepare_config calls
     # from concurrent gallery-dl users don't trample each other.
@@ -312,6 +321,7 @@ def create_app(
         library_root=library_root,
         r2_client=r2_client,
         on_complete=_after_sync,
+        on_new_items=_on_new_items,
     )
     app.state.sync_runner = sync_runner
 

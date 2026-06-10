@@ -110,3 +110,26 @@ def test_worker_reports_new_post_count(
 
     assert runner.state.auth_error is False
     assert runner.state.last_added == 4  # fake_library has 4 posts
+
+
+@pytest.mark.unit
+def test_on_new_items_fires_only_when_posts_added(
+    tmp_path: Path, fake_library: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """dedup 起動条件の本丸: 新着ゼロなら on_new_items は呼ばれない (Phase 2)。"""
+    monkeypatch.setattr(
+        "gallery_dl.job.DownloadJob",
+        _fake_downloadjob((logging.INFO, "[twitter] downloaded")),
+    )
+    calls: list[int] = []
+    runner = _runner_with_username(tmp_path, library_root=fake_library)
+    runner._on_complete = lambda: ingest_to_db(fake_library, runner._db)
+    runner._on_new_items = calls.append
+
+    runner._worker()
+    assert calls == [4]  # fake_library の 4 posts が ingest された
+
+    # 2 回目: 既に ingest 済み = 新着 0 → 呼ばれない
+    runner._worker()
+    assert calls == [4]
+    assert runner.state.last_added == 0

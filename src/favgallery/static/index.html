@@ -1611,9 +1611,10 @@ async function pollSync() {
     } else {
       showNotice('同期完了：新着なし', { kind: 'info' });
     }
-    await fetch('/api/dedup/run', { method: 'POST' });
+    // dedup の起動はサーバー側 _after_sync が「新着があった時だけ」行う
+    // (2026-06-10 Phase 2 — フロントからの毎回 POST を廃止)。ここは進捗
+    // ポーリングのみ: 未起動なら status が即 running:false で砂時計も消える。
     pollDedup({ refreshAfter: true });
-    await fetch('/api/dedup/visual/run', { method: 'POST' });
     pollVisualDedup({ refreshAfter: true });
   } else {
     _syncActive = false; updateLoadingState();

@@ -102,11 +102,6 @@ class AppContext:
         with self.state_lock:
             self._state.pop("listed_keys", None)
 
-    def after_sync(self) -> None:
-        """Refresh the index and auto-run dedup after a successful sync."""
-        self.refresh_index()
-        self.dedup_runner.start()
-
     # --- misc helpers -------------------------------------------------------
     def me_username(self) -> str:
         return (self.db.get_setting(_MY_USERNAME_KEY) or "").strip()
