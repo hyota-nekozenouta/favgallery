@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from xlikes_viewer.db import Database
-from xlikes_viewer.sync import SyncRunner
+from favgallery.db import Database
+from favgallery.sync import SyncRunner
 
 
 class _FakeR2:

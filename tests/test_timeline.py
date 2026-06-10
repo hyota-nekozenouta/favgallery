@@ -1,4 +1,4 @@
-"""Tests for xlikes_viewer.timeline."""
+"""Tests for favgallery.timeline."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from unittest.mock import patch
 import pytest
 from gallery_dl import exception as gdle
 
-from xlikes_viewer.db import Database
-from xlikes_viewer.timeline import (
+from favgallery.db import Database
+from favgallery.timeline import (
     DEFAULT_TIMELINE_URL,
     REFRESH_COOLDOWN_SECONDS,
     TimelineRefresher,
@@ -96,7 +96,7 @@ def test_refresher_runs_via_mocked_fetch(db: Database, tmp_path: Path) -> None:
             },
         ),
     ]
-    with patch("xlikes_viewer.timeline.fetch_timeline_metadata", return_value=fake):
+    with patch("favgallery.timeline.fetch_timeline_metadata", return_value=fake):
         ok = r.start()
         assert ok is True
         # block until the worker finishes
@@ -127,7 +127,7 @@ def test_refresher_flags_auth_error_when_cookies_rejected(
         # re-raises it so the refresher can flag it (it does NOT silently return []).
         raise gdle.AuthRequired(("auth_token", "cookies"), "timeline")
 
-    with patch("xlikes_viewer.timeline.fetch_timeline_metadata", side_effect=_fake_fetch):
+    with patch("favgallery.timeline.fetch_timeline_metadata", side_effect=_fake_fetch):
         r._worker(DEFAULT_TIMELINE_URL, "1-300")
 
     assert r.state.auth_error is True
@@ -146,7 +146,7 @@ def test_refresher_flags_auth_error_on_expired_cookie_abort(
     def _fake_fetch(_config_path: Path, *, url: str, range_spec: str) -> list:
         raise gdle.AbortExtraction("Unable to retrieve Tweets from this timeline")
 
-    with patch("xlikes_viewer.timeline.fetch_timeline_metadata", side_effect=_fake_fetch):
+    with patch("favgallery.timeline.fetch_timeline_metadata", side_effect=_fake_fetch):
         r._worker(DEFAULT_TIMELINE_URL, "1-300")
 
     assert r.state.auth_error is True
@@ -156,7 +156,7 @@ def test_refresher_flags_auth_error_on_expired_cookie_abort(
 @pytest.mark.unit
 def test_refresher_clean_run_has_no_auth_error(db: Database, tmp_path: Path) -> None:
     r = TimelineRefresher(db, tmp_path / "config.json")
-    with patch("xlikes_viewer.timeline.fetch_timeline_metadata", return_value=[]):
+    with patch("favgallery.timeline.fetch_timeline_metadata", return_value=[]):
         r._worker(DEFAULT_TIMELINE_URL, "1-300")
 
     assert r.state.auth_error is False

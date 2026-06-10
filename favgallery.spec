@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('src\\xlikes_viewer\\static', 'xlikes_viewer/static')]
+datas = [('src\\favgallery\\static', 'favgallery/static')]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('uvicorn')
@@ -13,7 +13,7 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
-    ['src\\xlikes_viewer\\__main__.py'],
+    ['src\\favgallery\\__main__.py'],
     pathex=['src'],
     binaries=binaries,
     datas=datas,
@@ -33,7 +33,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='xlikes-viewer',
+    name='favgallery',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

@@ -1,4 +1,4 @@
-"""Tests for xlikes_viewer.book_importer.BookImportQueue.
+"""Tests for favgallery.book_importer.BookImportQueue.
 
 Exercises the queue worker with gallery-dl stubbed out (so the HTML-scrape
 fallback path runs) and the scraper stubbed to produce real images. Locks in
@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from xlikes_viewer.book_importer import BookImportQueue
-from xlikes_viewer.db import Database
+from favgallery.book_importer import BookImportQueue
+from favgallery.db import Database
 
 _TERMINAL = {"done", "error", "skipped"}
 
@@ -56,8 +56,8 @@ def _queue(tmp_path: Path) -> tuple[BookImportQueue, Database, Path]:
 def test_import_creates_book_via_scrape_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("xlikes_viewer.book_importer.subprocess.run", _no_gallery_dl)
-    monkeypatch.setattr("xlikes_viewer.book_importer.scrape_images_from_html", _make_scraper(2))
+    monkeypatch.setattr("favgallery.book_importer.subprocess.run", _no_gallery_dl)
+    monkeypatch.setattr("favgallery.book_importer.scrape_images_from_html", _make_scraper(2))
 
     q, db, lib = _queue(tmp_path)
     item = q.enqueue("https://example.test/gallery/my-cool-book")
@@ -76,8 +76,8 @@ def test_import_creates_book_via_scrape_fallback(
 def test_import_no_images_marks_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("xlikes_viewer.book_importer.subprocess.run", _no_gallery_dl)
-    monkeypatch.setattr("xlikes_viewer.book_importer.scrape_images_from_html", _make_scraper(0))
+    monkeypatch.setattr("favgallery.book_importer.subprocess.run", _no_gallery_dl)
+    monkeypatch.setattr("favgallery.book_importer.scrape_images_from_html", _make_scraper(0))
 
     q, db, _lib = _queue(tmp_path)
     item = q.enqueue("https://example.test/empty")
@@ -94,8 +94,8 @@ def test_queue_drains_two_urls_and_skips_duplicate(
 ) -> None:
     # Both URLs yield identical images, so the second must be detected as a
     # duplicate. Crucially, BOTH must reach a terminal status (queue self-chains).
-    monkeypatch.setattr("xlikes_viewer.book_importer.subprocess.run", _no_gallery_dl)
-    monkeypatch.setattr("xlikes_viewer.book_importer.scrape_images_from_html", _make_scraper(2))
+    monkeypatch.setattr("favgallery.book_importer.subprocess.run", _no_gallery_dl)
+    monkeypatch.setattr("favgallery.book_importer.scrape_images_from_html", _make_scraper(2))
 
     q, db, _lib = _queue(tmp_path)
     item1 = q.enqueue("https://example.test/a")

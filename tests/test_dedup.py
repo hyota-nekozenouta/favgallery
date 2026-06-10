@@ -1,4 +1,4 @@
-"""Tests for xlikes_viewer.dedup."""
+"""Tests for favgallery.dedup."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from xlikes_viewer.db import Database
-from xlikes_viewer.dedup import _file_sha256, delete_duplicates, index_hashes
+from favgallery.db import Database
+from favgallery.dedup import _file_sha256, delete_duplicates, index_hashes
 
 
 @pytest.fixture
@@ -121,7 +121,7 @@ def test_index_skips_thumb_cache(tmp_path: Path, db: Database) -> None:
 
 @pytest.mark.unit
 def test_runner_starts_only_once(tmp_path: Path, db: Database) -> None:
-    from xlikes_viewer.dedup import DedupRunner
+    from favgallery.dedup import DedupRunner
 
     lib = tmp_path / "library"
     lib.mkdir()

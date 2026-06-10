@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from xlikes_viewer.db import Database
-from xlikes_viewer.scanner import ingest_to_db
-from xlikes_viewer.sync import SyncRunner
+from favgallery.db import Database
+from favgallery.scanner import ingest_to_db
+from favgallery.sync import SyncRunner
 
 
 def _fake_downloadjob(*records: tuple[int, str]) -> type:
@@ -39,7 +39,7 @@ def _fake_downloadjob(*records: tuple[int, str]) -> type:
 @pytest.fixture(autouse=True)
 def _no_real_gallerydl(monkeypatch: pytest.MonkeyPatch) -> None:
     # prepare_config writes/merges gallery-dl's global config — stub it out.
-    monkeypatch.setattr("xlikes_viewer.gallerydl.prepare_config", lambda *a, **k: None)
+    monkeypatch.setattr("favgallery.gallerydl.prepare_config", lambda *a, **k: None)
 
 
 def _runner_with_username(

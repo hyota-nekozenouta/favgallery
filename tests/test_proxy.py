@@ -1,4 +1,4 @@
-"""Tests for xlikes_viewer.proxy."""
+"""Tests for favgallery.proxy."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from xlikes_viewer.proxy import _load_cookies, is_allowed
+from favgallery.proxy import _load_cookies, is_allowed
 
 
 @pytest.mark.unit

@@ -1,4 +1,4 @@
-"""Tests for xlikes_viewer.book_dedup (duplicate-book detection)."""
+"""Tests for favgallery.book_dedup (duplicate-book detection)."""
 
 from __future__ import annotations
 
@@ -8,14 +8,14 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from xlikes_viewer.book_dedup import (
+from favgallery.book_dedup import (
     BookIndexRunner,
     find_duplicate_book,
     fingerprint_for_ordered_files,
     fingerprint_matches,
     sample_page_nums,
 )
-from xlikes_viewer.db import Database
+from favgallery.db import Database
 
 
 @pytest.fixture

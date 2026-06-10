@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from xlikes_viewer.routers import cookies as cookies_router
-from xlikes_viewer.server import _write_cookies_from_env, create_app
+from favgallery.routers import cookies as cookies_router
+from favgallery.server import _write_cookies_from_env, create_app
 
 # A minimal but realistic Netscape-format cookies.txt with the X auth cookie.
 VALID_COOKIES = (

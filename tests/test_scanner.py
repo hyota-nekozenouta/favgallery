@@ -1,4 +1,4 @@
-"""Tests for xlikes_viewer.scanner."""
+"""Tests for favgallery.scanner."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from xlikes_viewer.db import Database
-from xlikes_viewer.scanner import ingest_to_db, scan_library
-from xlikes_viewer.x_helpers import extract_hashtags
+from favgallery.db import Database
+from favgallery.scanner import ingest_to_db, scan_library
+from favgallery.x_helpers import extract_hashtags
 
 
 @pytest.mark.unit

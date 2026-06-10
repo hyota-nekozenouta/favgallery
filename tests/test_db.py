@@ -1,4 +1,4 @@
-"""Tests for xlikes_viewer.db."""
+"""Tests for favgallery.db."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from xlikes_viewer.db import Database, TimelinePost
+from favgallery.db import Database, TimelinePost
 
 
 @pytest.fixture
