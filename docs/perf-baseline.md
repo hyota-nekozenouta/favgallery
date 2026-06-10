@@ -18,6 +18,20 @@
 | GET /api/books/tags | 7.70ms | 9.79ms |
 | GET / (index) | 9.59ms | 14.84ms |
 
+## Phase 1 完了後（2026-06-10・WAL/index/N+1/listed-keys cache/strong ETag）
+
+| endpoint | before p50 | after p50 | 差 |
+|---|---|---|---|
+| GET /api/library | 38.98ms | 11.50ms | **-70%** |
+| GET /api/posts?limit=60 | 38.38ms | 11.12ms | **-71%** |
+| GET /api/posts?author= | 53.66ms | 12.28ms | **-77%** |
+| GET /api/books | 17.77ms | 13.32ms | -25% |
+| GET /api/timeline?media_type= | 24.93ms | 20.88ms | -16% |
+
+※ timeline 素クエリは run 間ノイズが大きい（30→51ms に見えるが p95 が跳ねており計測機の負荷由来）。
+※ Phase 1-6（メタデータ Cache-Control）は**意図的に見送り** — /api/library は同期直後にフロントが
+再取得して新着を反映する設計のため、ブラウザキャッシュは新着不可視バグを生む（隠れ結合 #5）。
+
 ## 構造的コスト（リファクタ前・コード検証で確定）
 
 - ページロードごとに自動同期（gallery-dl フルスクレイプ）+ 重複チェック 2 種（SHA-256 全走査 + imagehash）= 変化ゼロでも 20〜90 秒の background CPU
