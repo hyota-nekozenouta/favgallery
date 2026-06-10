@@ -82,7 +82,7 @@ Basic 認証のダイアログが表示されれば成功。
 ### 2-1. Railway 側でカスタムドメインを追加
 
 1. Railway プロジェクト → **Settings** → **Networking** → **Add Custom Domain**
-2. 使用するドメイン（例: `archive.example.com`）を入力
+2. 使用するドメイン（例: `favgallery.example.com`。本番は `favgallery.hyota.cloud`）を入力
 3. Railway が CNAME レコードの向き先を表示する（例: `xyz.railway.app`）
 
 ### 2-2. Cloudflare DNS 設定
@@ -90,7 +90,7 @@ Basic 認証のダイアログが表示されれば成功。
 1. Cloudflare ダッシュボード → 対象ドメイン → **DNS** タブ
 2. **Add Record**:
    - Type: `CNAME`
-   - Name: `archive`（サブドメイン部分）
+   - Name: `favgallery`（サブドメイン部分）
    - Target: Railway が指示した CNAME ターゲット
    - Proxy status: **Proxied（オレンジ雲）** に設定（Cloudflare 経由になる）
 
@@ -105,7 +105,7 @@ Cloudflare の SSL/TLS モードを確認する:
 
 ### 2-4. 動作確認
 
-`https://archive.example.com` にアクセスして Basic 認証が表示されることを確認する。
+`https://favgallery.example.com`（本番: `https://favgallery.hyota.cloud`）にアクセスして Basic 認証が表示されることを確認する。
 
 ---
 
