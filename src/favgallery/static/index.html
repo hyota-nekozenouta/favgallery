@@ -190,6 +190,7 @@
           <span class="text-xs text-zinc-500" id="postCount"></span>
           <div class="flex-1"></div>
           <span id="loadingIndicator" class="hidden text-base leading-none select-none">⏳</span>
+          <button id="manualSyncBtn" class="text-zinc-500 hover:text-zinc-200 text-base p-1 rounded hover:bg-zinc-800" title="今すぐ同期">⟳</button>
           <button id="optionsBtn" class="text-zinc-500 hover:text-zinc-200 text-base p-1 rounded hover:bg-zinc-800" title="設定">⚙</button>
         </div>
         <div id="sidebarPostsHeader">
@@ -2054,10 +2055,11 @@ async function loadFavoriteAuthors() {
   setupSeenObserver();
   await fetchPosts();
   // Auto-sync on page load — runs in background, does not block UI.
+  // ?auto=1: サーバー側 10 分クールダウン対象 (Phase 2B)。429 = クールダウン中
+  // は正常系なので無言スキップ (409 = 実行中も同様)。
   try {
-    const syncRes = await fetch('/api/sync/start', { method: 'POST' });
-    if (!syncRes.ok && syncRes.status !== 409) {
-      // 409 = already running → silent ignore. Other errors (e.g. 400 = cookies missing) → notify.
+    const syncRes = await fetch('/api/sync/start?auto=1', { method: 'POST' });
+    if (!syncRes.ok && syncRes.status !== 409 && syncRes.status !== 429) {
       const d = await syncRes.json().catch(() => ({}));
       const reason = d.reason || `HTTP ${syncRes.status}`;
       showNotice('同期エラー: ' + reason, { kind: 'error', sticky: true });
@@ -2065,6 +2067,26 @@ async function loadFavoriteAuthors() {
   } catch { /* network error during sync start — ignore */ }
   await pollSync();
 })();
+
+// 手動同期 (Phase 2B): クールダウン導入で「リロード = 強制同期」が消えるため、
+// いつでも即時同期できる入口をヘッダーに常設。
+document.getElementById('manualSyncBtn')?.addEventListener('click', async () => {
+  try {
+    const r = await fetch('/api/sync/start', { method: 'POST' });
+    if (r.ok) {
+      showNotice('同期を開始しました', { kind: 'info' });
+      pollSync();
+    } else if (r.status === 409) {
+      showNotice('同期は既に実行中です', { kind: 'info' });
+      pollSync();
+    } else {
+      const d = await r.json().catch(() => ({}));
+      showNotice('同期エラー: ' + (d.reason || `HTTP ${r.status}`), { kind: 'error', sticky: true });
+    }
+  } catch (e) {
+    showNotice('同期エラー: ' + e.message, { kind: 'error' });
+  }
+});
 
 // --- Bookshelf ---------------------------------------------------
 state.books = [];

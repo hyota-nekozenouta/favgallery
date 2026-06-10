@@ -133,3 +133,37 @@ def test_on_new_items_fires_only_when_posts_added(
     runner._worker()
     assert calls == [4]
     assert runner.state.last_added == 0
+
+
+# --- 自動同期クールダウン (Phase 2B / 2026-06-10) ------------------------------
+
+
+@pytest.mark.integration
+def test_auto_sync_cooldown(fake_library: Path) -> None:
+    """auto=1 は前回同期から 10 分以内なら 429、手動は常に通る。"""
+    from time import time as now
+
+    from fastapi.testclient import TestClient
+
+    from favgallery.server import create_app
+
+    app = create_app(library_root=fake_library, scan_in_background=False)
+    client = TestClient(app)
+    (fake_library / "cookies.txt").write_text("# c\n.x.com\tTRUE\t/\tTRUE\t9\tauth_token\tx\n")
+    runner = app.state.sync_runner
+    runner.state.running = True  # 実 gallery-dl を起動させない (start() は 409 になる)
+
+    # 前回完了が 100 秒前 → auto はクールダウン 429
+    runner.state.finished_at = now() - 100
+    r = client.post("/api/sync/start?auto=1")
+    assert r.status_code == 429
+    assert "クールダウン" in r.json()["reason"]
+
+    # 手動 (フラグなし) はクールダウン対象外 → 実行系へ到達 (running なので 409)
+    r2 = client.post("/api/sync/start")
+    assert r2.status_code == 409
+
+    # 11 分経過後は auto も実行系へ到達 (running なので 409)
+    runner.state.finished_at = now() - 660
+    r3 = client.post("/api/sync/start?auto=1")
+    assert r3.status_code == 409
