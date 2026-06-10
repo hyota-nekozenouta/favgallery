@@ -13,33 +13,33 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from xlikes_viewer.book_dedup import BookIndexRunner
-from xlikes_viewer.book_importer import BookImportQueue
-from xlikes_viewer.context import AppContext
-from xlikes_viewer.db import Database
-from xlikes_viewer.dedup import DedupRunner, VisualDedupRunner
-from xlikes_viewer.gallerydl_config import write_gallerydl_config
-from xlikes_viewer.paths import portable_root
-from xlikes_viewer.proxy import CdnProxy
-from xlikes_viewer.r2 import R2Client, r2_config_from_env
-from xlikes_viewer.routers import admin as admin_router
-from xlikes_viewer.routers import books as books_router
-from xlikes_viewer.routers import cookies as cookies_router
-from xlikes_viewer.routers import dedup as dedup_router
-from xlikes_viewer.routers import lists as lists_router
-from xlikes_viewer.routers import me as me_router
-from xlikes_viewer.routers import media as media_router
-from xlikes_viewer.routers import posts as posts_router
-from xlikes_viewer.routers import sync as sync_router
-from xlikes_viewer.routers import timeline as timeline_router
-from xlikes_viewer.scanner import (
+from favgallery.book_dedup import BookIndexRunner
+from favgallery.book_importer import BookImportQueue
+from favgallery.context import AppContext
+from favgallery.db import Database
+from favgallery.dedup import DedupRunner, VisualDedupRunner
+from favgallery.gallerydl_config import write_gallerydl_config
+from favgallery.paths import portable_root
+from favgallery.proxy import CdnProxy
+from favgallery.r2 import R2Client, r2_config_from_env
+from favgallery.routers import admin as admin_router
+from favgallery.routers import books as books_router
+from favgallery.routers import cookies as cookies_router
+from favgallery.routers import dedup as dedup_router
+from favgallery.routers import lists as lists_router
+from favgallery.routers import me as me_router
+from favgallery.routers import media as media_router
+from favgallery.routers import posts as posts_router
+from favgallery.routers import sync as sync_router
+from favgallery.routers import timeline as timeline_router
+from favgallery.scanner import (
     DEFAULT_LIBRARY,
     Index,
     build_index_from_db,
     ingest_to_db,
 )
-from xlikes_viewer.sync import SyncRunner
-from xlikes_viewer.timeline import (
+from favgallery.sync import SyncRunner
+from favgallery.timeline import (
     TimelineRefresher,
 )
 
@@ -88,8 +88,22 @@ def _ensure_gallerydl_config(config_path: Path, library_root: Path) -> None:
     write_gallerydl_config(config_path, library_root)
 
 
+def _env_first(*names: str) -> str:
+    """Return the first non-empty value among the given env var names.
+
+    Rename transition (2026-06-10): new FAVGALLERY_* vars take precedence,
+    legacy ARCHIVE_* vars keep working until Railway env is migrated.
+    """
+    for name in names:
+        value = os.environ.get(name, "")
+        if value:
+            return value
+    return ""
+
+
 def _make_basic_auth_middleware():
-    """Return an HTTP Basic auth middleware if ARCHIVE_USER/ARCHIVE_PASSWORD are set.
+    """Return an HTTP Basic auth middleware if FAVGALLERY_USER/FAVGALLERY_PASSWORD
+    (or legacy ARCHIVE_USER/ARCHIVE_PASSWORD) are set.
 
     When the env vars are absent the middleware is a no-op, so development /
     local-desktop use works without configuration.
@@ -97,10 +111,10 @@ def _make_basic_auth_middleware():
     """
 
     async def basic_auth_middleware(request: Request, call_next):
-        archive_user = os.environ.get("ARCHIVE_USER", "")
-        archive_password = os.environ.get("ARCHIVE_PASSWORD", "")
+        auth_user = _env_first("FAVGALLERY_USER", "ARCHIVE_USER")
+        auth_password = _env_first("FAVGALLERY_PASSWORD", "ARCHIVE_PASSWORD")
 
-        if not archive_user or not archive_password:
+        if not auth_user or not auth_password:
             # Auth not configured — pass through (local / dev use).
             return await call_next(request)
 
@@ -122,8 +136,8 @@ def _make_basic_auth_middleware():
                 headers={"WWW-Authenticate": 'Basic realm="Archive"'},
             )
 
-        user_ok = secrets.compare_digest(req_user, archive_user)
-        pass_ok = secrets.compare_digest(req_pass, archive_password)
+        user_ok = secrets.compare_digest(req_user, auth_user)
+        pass_ok = secrets.compare_digest(req_pass, auth_password)
         if not (user_ok and pass_ok):
             return Response(
                 content="Unauthorized",
@@ -157,7 +171,8 @@ def create_app(
 
     db = Database(library_root / "xlikes.sqlite")
     # cookies.txt lives INSIDE library_root (the Railway volume mount at
-    # ARCHIVE_LIBRARY_ROOT), next to the DB, so the UI-set cookie survives
+    # FAVGALLERY_LIBRARY_ROOT / legacy ARCHIVE_LIBRARY_ROOT), next to the DB,
+    # so the UI-set cookie survives
     # redeploys. The old location (library_root.parent) sat above the volume on
     # ephemeral container storage and was wiped on every redeploy.
     cookies_file = library_root / "cookies.txt"
@@ -322,17 +337,18 @@ def create_app(
 
 # ---------------------------------------------------------------------------
 # Module-level ASGI app for direct uvicorn invocation:
-#   uvicorn xlikes_viewer.server:app --host 0.0.0.0 --port $PORT
+#   uvicorn favgallery.server:app --host 0.0.0.0 --port $PORT
 #
-# Library root is resolved from the ARCHIVE_LIBRARY_ROOT env var when set
-# (Railway production), falling back to the default portable/installed path.
+# Library root is resolved from the FAVGALLERY_LIBRARY_ROOT env var when set
+# (Railway production; legacy ARCHIVE_LIBRARY_ROOT still works as fallback),
+# falling back to the default portable/installed path.
 # ---------------------------------------------------------------------------
 def _module_level_app() -> FastAPI:
-    library_root_env = os.environ.get("ARCHIVE_LIBRARY_ROOT", "")
+    library_root_env = _env_first("FAVGALLERY_LIBRARY_ROOT", "ARCHIVE_LIBRARY_ROOT")
     if library_root_env:
         library_root = Path(library_root_env)
     else:
-        from xlikes_viewer.paths import default_library_root
+        from favgallery.paths import default_library_root
         library_root = default_library_root()
     return create_app(library_root=library_root)
 

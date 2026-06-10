@@ -1,4 +1,4 @@
-"""Tests for xlikes_viewer.server using FastAPI's TestClient."""
+"""Tests for favgallery.server using FastAPI's TestClient."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.conftest import _write_post
-from xlikes_viewer.server import create_app
+from favgallery.server import create_app
 
 # ---------------------------------------------------------------------------
 # Basic auth tests
@@ -69,6 +69,53 @@ def test_basic_auth_disabled_when_env_vars_absent(
     # No Authorization header — should still succeed (dev / local mode)
     r = client.get("/")
     assert r.status_code == 200
+
+
+@pytest.mark.integration
+def test_basic_auth_accepts_favgallery_env_vars(
+    monkeypatch: pytest.MonkeyPatch, fake_library: Path
+) -> None:
+    """New FAVGALLERY_* env vars configure Basic auth (rename, 2026-06-10)."""
+    monkeypatch.delenv("ARCHIVE_USER", raising=False)
+    monkeypatch.delenv("ARCHIVE_PASSWORD", raising=False)
+    monkeypatch.setenv("FAVGALLERY_USER", "newuser")
+    monkeypatch.setenv("FAVGALLERY_PASSWORD", "newpass")
+    app = create_app(library_root=fake_library, scan_in_background=False)
+    client = TestClient(app, raise_server_exceptions=False)
+    assert client.get("/").status_code == 401
+    r = client.get("/", headers={"Authorization": _basic_header("newuser", "newpass")})
+    assert r.status_code == 200
+
+
+@pytest.mark.integration
+def test_basic_auth_favgallery_env_wins_over_archive_env(
+    monkeypatch: pytest.MonkeyPatch, fake_library: Path
+) -> None:
+    """When both old and new env vars are set, FAVGALLERY_* takes precedence."""
+    monkeypatch.setenv("ARCHIVE_USER", "olduser")
+    monkeypatch.setenv("ARCHIVE_PASSWORD", "oldpass")
+    monkeypatch.setenv("FAVGALLERY_USER", "newuser")
+    monkeypatch.setenv("FAVGALLERY_PASSWORD", "newpass")
+    app = create_app(library_root=fake_library, scan_in_background=False)
+    client = TestClient(app, raise_server_exceptions=False)
+    r = client.get("/", headers={"Authorization": _basic_header("newuser", "newpass")})
+    assert r.status_code == 200
+    r_old = client.get("/", headers={"Authorization": _basic_header("olduser", "oldpass")})
+    assert r_old.status_code == 401
+
+
+@pytest.mark.unit
+def test_env_first_returns_first_non_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    from favgallery.server import _env_first
+
+    monkeypatch.delenv("FAVGALLERY_TEST_A", raising=False)
+    monkeypatch.setenv("FAVGALLERY_TEST_B", "fallback-value")
+    assert _env_first("FAVGALLERY_TEST_A", "FAVGALLERY_TEST_B") == "fallback-value"
+    monkeypatch.setenv("FAVGALLERY_TEST_A", "primary-value")
+    assert _env_first("FAVGALLERY_TEST_A", "FAVGALLERY_TEST_B") == "primary-value"
+    monkeypatch.delenv("FAVGALLERY_TEST_A", raising=False)
+    monkeypatch.delenv("FAVGALLERY_TEST_B", raising=False)
+    assert _env_first("FAVGALLERY_TEST_A", "FAVGALLERY_TEST_B") == ""
 
 
 @pytest.fixture
@@ -254,7 +301,7 @@ def test_author_summary_video(client: TestClient) -> None:
 def test_author_unliked_filters_local_archive(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path
 ) -> None:
-    from xlikes_viewer.db import TimelinePost
+    from favgallery.db import TimelinePost
 
     def make(tweet_id: str) -> TimelinePost:
         return TimelinePost(
@@ -273,7 +320,7 @@ def test_author_unliked_filters_local_archive(
         assert author == "alice"
         return fake_posts
 
-    monkeypatch.setattr("xlikes_viewer.routers.posts.fetch_author_media_posts", fake_fetch)
+    monkeypatch.setattr("favgallery.routers.posts.fetch_author_media_posts", fake_fetch)
     app = create_app(library_root=fake_library, scan_in_background=False)
     client = TestClient(app)
     r = client.get("/api/authors/alice/unliked")
@@ -293,7 +340,7 @@ def test_author_unliked_propagates_gallerydl_failure(
     def boom(*_a: object, **_kw: object) -> None:
         raise RuntimeError("auth missing")
 
-    monkeypatch.setattr("xlikes_viewer.routers.posts.fetch_author_media_posts", boom)
+    monkeypatch.setattr("favgallery.routers.posts.fetch_author_media_posts", boom)
     app = create_app(library_root=fake_library, scan_in_background=False)
     client = TestClient(app)
     r = client.get("/api/authors/alice/unliked")
@@ -305,7 +352,7 @@ def test_author_unliked_propagates_gallerydl_failure(
 def test_author_unliked_filters_x_side_favorited(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path
 ) -> None:
-    from xlikes_viewer.db import TimelinePost
+    from favgallery.db import TimelinePost
 
     def make(tweet_id: str, *, favorited: bool) -> TimelinePost:
         return TimelinePost(
@@ -326,7 +373,7 @@ def test_author_unliked_filters_x_side_favorited(
     def fake_fetch(_cfg: object, _author: str, *, range_spec: str) -> list[TimelinePost]:
         return fake_posts
 
-    monkeypatch.setattr("xlikes_viewer.routers.posts.fetch_author_media_posts", fake_fetch)
+    monkeypatch.setattr("favgallery.routers.posts.fetch_author_media_posts", fake_fetch)
     app = create_app(library_root=fake_library, scan_in_background=False)
     client = TestClient(app)
     r = client.get("/api/authors/alice/unliked")
@@ -347,7 +394,7 @@ def test_author_unliked_pagination_offset(
         captured["range_spec"] = range_spec
         return []
 
-    monkeypatch.setattr("xlikes_viewer.routers.posts.fetch_author_media_posts", fake_fetch)
+    monkeypatch.setattr("favgallery.routers.posts.fetch_author_media_posts", fake_fetch)
     app = create_app(library_root=fake_library, scan_in_background=False)
     client = TestClient(app)
 
@@ -361,7 +408,7 @@ def test_author_unliked_pagination_offset(
 
 @pytest.mark.integration
 def test_timeline_by_tweet_returns_all_nums_in_order(client: TestClient) -> None:
-    from xlikes_viewer.db import TimelinePost
+    from favgallery.db import TimelinePost
 
     def post(num: int) -> TimelinePost:
         return TimelinePost(
@@ -421,7 +468,7 @@ def test_me_likes_sync_requires_username(client: TestClient) -> None:
 def test_unliked_filters_out_my_likes(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path
 ) -> None:
-    from xlikes_viewer.db import TimelinePost
+    from favgallery.db import TimelinePost
 
     def make(tweet_id: str) -> TimelinePost:
         return TimelinePost(
@@ -434,7 +481,7 @@ def test_unliked_filters_out_my_likes(
         )
 
     monkeypatch.setattr(
-        "xlikes_viewer.routers.posts.fetch_author_media_posts",
+        "favgallery.routers.posts.fetch_author_media_posts",
         lambda *_a, **_kw: [make("5001"), make("5002"), make("5003")],
     )
     app = create_app(library_root=fake_library, scan_in_background=False)
@@ -553,8 +600,8 @@ def test_ensure_gallerydl_config_written_in_nonportable_env(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path, tmp_path: Path
 ) -> None:
     """_ensure_gallerydl_config must write gallery-dl.json when portable_root() is None (Railway)."""
-    from xlikes_viewer import server as server_module
-    from xlikes_viewer.server import _ensure_gallerydl_config
+    from favgallery import server as server_module
+    from favgallery.server import _ensure_gallerydl_config
 
     monkeypatch.setattr(server_module, "portable_root", lambda: None)
     config_path = tmp_path / "config" / "gallery-dl.json"
@@ -587,15 +634,15 @@ def test_gallerydl_config_path_is_under_data_in_nonportable_env(
 def test_like_and_save_records_my_like(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path
 ) -> None:
-    from xlikes_viewer import like as like_module
-    from xlikes_viewer import save_one as save_module
+    from favgallery import like as like_module
+    from favgallery import save_one as save_module
 
     monkeypatch.setattr(
-        "xlikes_viewer.routers.timeline.like_tweet",
+        "favgallery.routers.timeline.like_tweet",
         lambda *_a, **_kw: like_module.LikeResult(ok=True, status_code=200, message="ok"),
     )
     monkeypatch.setattr(
-        "xlikes_viewer.routers.timeline.save_tweet",
+        "favgallery.routers.timeline.save_tweet",
         lambda *_a, **_kw: save_module.SaveResult(ok=True, return_code=0, message="ok"),
     )
     app = create_app(library_root=fake_library, scan_in_background=False)
