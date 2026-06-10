@@ -1520,7 +1520,7 @@ $$('.mt-btn').forEach(b => b.addEventListener('click', () => {
 // --- Notification banner (sync/timeline results + errors) ----------
 // One shared banner. Errors (e.g. expired cookies) stay until clicked; info
 // notices auto-dismiss. Surfaces outcomes that used to fail silently.
-function showNotice(message, { kind = 'info', sticky = false } = {}) {
+function showNotice(message, { kind = 'info', sticky = false, onClick = null } = {}) {
   document.getElementById('appNotice')?.remove();
   const el = document.createElement('div');
   el.id = 'appNotice';
@@ -1532,12 +1532,35 @@ function showNotice(message, { kind = 'info', sticky = false } = {}) {
     + 'max-width:80%;text-align:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4);';
   el.textContent = message;
   el.title = 'クリックで閉じる';
-  el.onclick = () => el.remove();
+  el.onclick = () => { if (onClick) onClick(); el.remove(); };
   document.body.appendChild(el);
   if (!sticky) setTimeout(() => { if (el.isConnected) el.remove(); }, 8000);
 }
 
 const COOKIE_EXPIRED_MSG = 'X の cookie が失効している可能性があります。再ログインして cookies を更新してください。';
+
+// verify-before-alarm: sync/timeline の auth_error はX側の一時 401 でも立つ
+// （backend は gallery-dl ログの正規表現スキャン）。怖い sticky バナーを出す前に
+// 軽量 verify（自分のいいね 1 件取得）で裏取りし、一過性なら控えめな通知に落とす。
+let _authNoticeShown = false;  // 同期+タイムライン同時失敗でバナー2枚重なるのを防ぐ
+async function notifyAuthFailure() {
+  if (_authNoticeShown) return;
+  _authNoticeShown = true;
+  try {
+    const r = await fetch('/api/cookies/verify', { method: 'POST' });
+    const v = await r.json();
+    if (v.ok) {
+      // cookie は生きている = 一過性の失敗（X の一時 401 / 再起動直後など）
+      showNotice('同期が一時的に失敗しました（cookie は有効です）。次回また自動で試します。', { kind: 'info' });
+      _authNoticeShown = false;
+      return;
+    }
+  } catch { /* verify 自体が通信失敗 → 従来どおり警告側に倒す */ }
+  // 本当に失効 or 判定不能 → 従来の sticky バナー（タップで設定モーダルを開く）
+  showNotice(COOKIE_EXPIRED_MSG + '（タップで設定を開く）', {
+    kind: 'error', sticky: true, onClick: openCookieModal,
+  });
+}
 
 async function pollSync() {
   const r = await fetch('/api/sync/status');
@@ -1552,8 +1575,8 @@ async function pollSync() {
     // Surface the outcome so a silent cookie-expiry failure becomes visible,
     // and so newly-synced likes actually appear without a manual reload.
     if (s.auth_error) {
-      // Fixed message (don't echo raw backend error text in the banner).
-      showNotice(COOKIE_EXPIRED_MSG, { kind: 'error', sticky: true });
+      // verify で裏取りしてから警告（固定文言・backend の生エラーは出さない）
+      notifyAuthFailure();
     } else if (s.last_added > 0) {
       showNotice(`新着 ${s.last_added} 件を取り込みました`, { kind: 'info' });
       await loadLibrary();
@@ -1917,7 +1940,7 @@ async function pollTimeline() {
   $('#timelineRefreshBtn').textContent = `⟳ 取得${tag}`;
   $('#timelineRefreshBtn').disabled = false;
   if (s.auth_error) {
-    showNotice(COOKIE_EXPIRED_MSG, { kind: 'error', sticky: true });
+    notifyAuthFailure();
   } else if (s.last_added > 0) {
     showNotice(`タイムライン 新着 ${s.last_added} 件`, { kind: 'info' });
   }
