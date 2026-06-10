@@ -13,9 +13,9 @@ from pathlib import Path
 
 import httpx
 
-from xlikes_viewer.x_helpers import load_cookie_jar
+from favgallery.x_helpers import load_cookie_jar
 
-log = logging.getLogger("xlikes_viewer.like")
+log = logging.getLogger("favgallery.like")
 
 # X web client public Bearer token (visible in X's web app source). Required by
 # X's GraphQL gateway alongside the per-user auth_token + ct0 cookies.
@@ -59,7 +59,7 @@ def like_tweet(cookies_file: Path, tweet_id: str) -> LikeResult:
         "x-twitter-auth-type": "OAuth2Session",
         "x-twitter-active-user": "yes",
         "content-type": "application/json",
-        "user-agent": "Mozilla/5.0 (xlikes-viewer)",
+        "user-agent": "Mozilla/5.0 (favgallery)",
         "origin": "https://x.com",
         "referer": "https://x.com/",
     }

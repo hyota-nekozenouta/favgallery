@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.conftest import _write_post
 from favgallery.server import create_app
+from tests.conftest import _write_post
 
 # ---------------------------------------------------------------------------
 # Basic auth tests
@@ -562,8 +562,8 @@ def test_cookies_file_lives_inside_library_root(fake_library: Path) -> None:
     not one level above it.
 
     Regression: the Railway volume is mounted at ``/data/library`` (==
-    ARCHIVE_LIBRARY_ROOT), so a cookies file at ``library_root.parent``
-    (``/data``) sat on ephemeral container storage and was wiped on every
+    FAVGALLERY_LIBRARY_ROOT, legacy ARCHIVE_LIBRARY_ROOT), so a cookies file
+    at ``library_root.parent`` (``/data``) sat on ephemeral storage, wiped on every
     redeploy — silently dropping the X-sync auth. Keeping it next to the DB
     (which demonstrably persists) makes it survive redeploys regardless of
     where the volume happens to be mounted.

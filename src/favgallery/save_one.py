@@ -6,10 +6,10 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from xlikes_viewer.gallerydl import prepare_config
-from xlikes_viewer.x_helpers import tweet_url
+from favgallery.gallerydl import prepare_config
+from favgallery.x_helpers import tweet_url
 
-log = logging.getLogger("xlikes_viewer.save_one")
+log = logging.getLogger("favgallery.save_one")
 
 
 @dataclass(frozen=True)

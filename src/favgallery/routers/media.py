@@ -5,8 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 
-from xlikes_viewer.context import AppContext, get_context
-from xlikes_viewer.thumbs import thumbnail_bytes, thumbnail_bytes_from_raw
+from favgallery.context import AppContext, get_context
+from favgallery.thumbs import thumbnail_bytes, thumbnail_bytes_from_raw
 
 router = APIRouter()
 

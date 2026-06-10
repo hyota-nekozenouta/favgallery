@@ -18,8 +18,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from xlikes_viewer.book_dedup import find_duplicate_book, fingerprint_for_ordered_files
-from xlikes_viewer.context import AppContext, get_context
+from favgallery.book_dedup import find_duplicate_book, fingerprint_for_ordered_files
+from favgallery.context import AppContext, get_context
 
 router = APIRouter()
 

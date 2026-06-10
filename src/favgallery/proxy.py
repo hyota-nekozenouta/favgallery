@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from xlikes_viewer.x_helpers import load_cookie_jar
+from favgallery.x_helpers import load_cookie_jar
 
 ALLOWED_HOSTS = {
     "pbs.twimg.com",
@@ -56,7 +56,7 @@ class CdnProxy:
                 timeout=httpx.Timeout(30.0, connect=10.0),
                 follow_redirects=True,
                 cookies=self._cookies,
-                headers={"User-Agent": "Mozilla/5.0 (xlikes-viewer)"},
+                headers={"User-Agent": "Mozilla/5.0 (favgallery)"},
             )
         return self._client
 

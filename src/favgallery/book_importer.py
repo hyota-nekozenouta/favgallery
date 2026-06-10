@@ -18,9 +18,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-from xlikes_viewer.book_dedup import find_duplicate_book, fingerprint_for_ordered_files
-from xlikes_viewer.gallerydl_config import build_book_import_config
-from xlikes_viewer.scrapers import scrape_images_from_html
+from favgallery.book_dedup import find_duplicate_book, fingerprint_for_ordered_files
+from favgallery.gallerydl_config import build_book_import_config
+from favgallery.scrapers import scrape_images_from_html
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".bmp"}
 

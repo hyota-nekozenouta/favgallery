@@ -6,7 +6,7 @@ When any variable is absent the module degrades gracefully: callers get None
 from ``r2_config_from_env`` and skip R2 operations.
 
 Install the optional dependency:
-    pip install 'xlikes-viewer[cloud]'
+    pip install 'favgallery[cloud]'
 """
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ class R2Client:
         except ImportError as exc:
             raise ImportError(
                 "boto3 is required for R2 storage. "
-                "Install it with: pip install 'xlikes-viewer[cloud]'"
+                "Install it with: pip install 'favgallery[cloud]'"
             ) from exc
         from botocore.config import Config  # type: ignore[import-untyped]
 

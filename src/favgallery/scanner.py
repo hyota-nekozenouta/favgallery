@@ -9,14 +9,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from xlikes_viewer.x_helpers import extract_hashtags
+from favgallery.x_helpers import extract_hashtags
 
 if TYPE_CHECKING:
-    from xlikes_viewer.db import Database
+    from favgallery.db import Database
 
 
 def _resolve_default_library() -> Path:
-    from xlikes_viewer.paths import default_library_root
+    from favgallery.paths import default_library_root
 
     return default_library_root()
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from xlikes_viewer.paths import portable_root
+from favgallery.paths import portable_root
 
 
 def _fwd(p: Path) -> str:

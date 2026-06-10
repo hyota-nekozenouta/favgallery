@@ -1,5 +1,5 @@
-"""xlikes-viewer — browse + sync your X liked-media archive."""
+"""favgallery — browse + sync your X liked-media archive."""
 
-from xlikes_viewer.scanner import Index, Post, scan_library
+from favgallery.scanner import Index, Post, scan_library
 
 __all__ = ["Index", "Post", "scan_library"]

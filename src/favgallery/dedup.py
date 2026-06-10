@@ -24,9 +24,9 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from xlikes_viewer.db import Database
+from favgallery.db import Database
 
-log = logging.getLogger("xlikes_viewer.dedup")
+log = logging.getLogger("favgallery.dedup")
 
 MEDIA_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".mp4", ".mov", ".webm"}
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}

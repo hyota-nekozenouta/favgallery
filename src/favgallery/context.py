@@ -16,12 +16,12 @@ from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request
 
-from xlikes_viewer.scanner import Index, build_index_from_db, ingest_to_db
+from favgallery.scanner import Index, build_index_from_db, ingest_to_db
 
 if TYPE_CHECKING:
-    from xlikes_viewer.db import Database
-    from xlikes_viewer.proxy import CdnProxy
-    from xlikes_viewer.r2 import R2Client
+    from favgallery.db import Database
+    from favgallery.proxy import CdnProxy
+    from favgallery.r2 import R2Client
 
 _MY_USERNAME_KEY = "my_username"
 

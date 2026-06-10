@@ -8,7 +8,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 
-from xlikes_viewer.context import AppContext, get_context
+from favgallery.context import AppContext, get_context
 
 router = APIRouter()
 

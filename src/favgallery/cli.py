@@ -1,4 +1,4 @@
-"""xlikes-viewer CLI: launch the local web app inside a desktop window."""
+"""favgallery CLI: launch the local web app inside a desktop window."""
 
 from __future__ import annotations
 

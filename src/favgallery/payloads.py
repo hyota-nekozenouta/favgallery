@@ -6,9 +6,9 @@ create an import cycle, since ``server`` imports the routers).
 
 from __future__ import annotations
 
-from xlikes_viewer.db import TimelinePost
-from xlikes_viewer.scanner import Post
-from xlikes_viewer.x_helpers import tweet_url
+from favgallery.db import TimelinePost
+from favgallery.scanner import Post
+from favgallery.x_helpers import tweet_url
 
 
 def _base_payload(

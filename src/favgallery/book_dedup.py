@@ -26,13 +26,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from xlikes_viewer.db import Database
-from xlikes_viewer.dedup import _compute_phash, _hamming
+from favgallery.db import Database
+from favgallery.dedup import _compute_phash, _hamming
 
 if TYPE_CHECKING:
-    from xlikes_viewer.r2 import R2Client
+    from favgallery.r2 import R2Client
 
-log = logging.getLogger("xlikes_viewer.book_dedup")
+log = logging.getLogger("favgallery.book_dedup")
 
 # Stricter than likes dedup's PHASH_THRESHOLD (5): a wrong book skip is silent
 # data loss, so we bias toward not-a-duplicate.

@@ -11,10 +11,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from xlikes_viewer.context import AppContext, get_context
-from xlikes_viewer.keys import r2_key_for_path
-from xlikes_viewer.payloads import _post_payload, _timeline_payload
-from xlikes_viewer.timeline import fetch_author_media_posts
+from favgallery.context import AppContext, get_context
+from favgallery.keys import r2_key_for_path
+from favgallery.payloads import _post_payload, _timeline_payload
+from favgallery.timeline import fetch_author_media_posts
 
 router = APIRouter()
 

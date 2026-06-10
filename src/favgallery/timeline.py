@@ -11,17 +11,17 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
-from xlikes_viewer.db import Database, TimelinePost
-from xlikes_viewer.gallerydl import prepare_config
-from xlikes_viewer.gdl_errors import (
+from favgallery.db import Database, TimelinePost
+from favgallery.gallerydl import prepare_config
+from favgallery.gdl_errors import (
     AUTH_FAILURE_MESSAGE,
     capture_gdl_logs,
     detect_auth_failure,
     is_auth_failure,
 )
-from xlikes_viewer.x_helpers import DISPLAYABLE_MEDIA_TYPES, extract_hashtags
+from favgallery.x_helpers import DISPLAYABLE_MEDIA_TYPES, extract_hashtags
 
-log = logging.getLogger("xlikes_viewer.timeline")
+log = logging.getLogger("favgallery.timeline")
 
 DEFAULT_TIMELINE_URL = "https://x.com/home/following"
 REFRESH_COOLDOWN_SECONDS = 60

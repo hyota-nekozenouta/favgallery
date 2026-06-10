@@ -10,16 +10,16 @@ from pathlib import Path
 from time import time
 from typing import TYPE_CHECKING, Any
 
-from xlikes_viewer.gdl_errors import (
+from favgallery.gdl_errors import (
     AUTH_FAILURE_MESSAGE,
     capture_gdl_logs,
     detect_auth_failure,
 )
-from xlikes_viewer.keys import iter_media_keys
+from favgallery.keys import iter_media_keys
 
 if TYPE_CHECKING:
-    from xlikes_viewer.db import Database
-    from xlikes_viewer.r2 import R2Client
+    from favgallery.db import Database
+    from favgallery.r2 import R2Client
 
 LOG_RING_SIZE = 200
 _MY_USERNAME_KEY = "my_username"
@@ -220,7 +220,7 @@ class SyncRunner:
     def _worker(self) -> None:
         from gallery_dl import job as gdl_job  # type: ignore[import-untyped]
 
-        from xlikes_viewer.gallerydl import prepare_config
+        from favgallery.gallerydl import prepare_config
 
         rc = 0
         err: str | None = None

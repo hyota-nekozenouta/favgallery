@@ -10,11 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from xlikes_viewer.context import AppContext, get_context
-from xlikes_viewer.like import like_tweet
-from xlikes_viewer.payloads import _timeline_payload
-from xlikes_viewer.proxy import is_allowed
-from xlikes_viewer.save_one import save_tweet
+from favgallery.context import AppContext, get_context
+from favgallery.like import like_tweet
+from favgallery.payloads import _timeline_payload
+from favgallery.proxy import is_allowed
+from favgallery.save_one import save_tweet
 
 router = APIRouter()
 

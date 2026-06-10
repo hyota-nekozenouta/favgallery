@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
-from xlikes_viewer.paths import default_library_root
+from favgallery.paths import default_library_root
 
 THUMB_CACHE_ROOT = default_library_root() / ".thumb-cache"
 

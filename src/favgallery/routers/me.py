@@ -10,8 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from xlikes_viewer.context import AppContext, get_context
-from xlikes_viewer.timeline import fetch_my_liked_tweet_ids
+from favgallery.context import AppContext, get_context
+from favgallery.timeline import fetch_my_liked_tweet_ids
 
 router = APIRouter()
 
