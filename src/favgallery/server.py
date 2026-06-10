@@ -186,7 +186,10 @@ def create_app(
         response.headers["X-App-Version"] = APP_VERSION
         path = request.url.path
         if path.startswith("/static/"):
-            if path == "/static/style.css":
+            # 成功応答のみ長期キャッシュ可。401 等に immutable を付けると
+            # 認証失敗がキャッシュされ続ける事故になりうる (2026-06-10)。
+            ok = response.status_code in (200, 304)
+            if path == "/static/style.css" and ok:
                 response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
             else:
                 response.headers["Cache-Control"] = "no-cache"

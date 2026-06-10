@@ -750,3 +750,17 @@ def test_index_references_versioned_stylesheet(client: TestClient) -> None:
     html = client.get("/").text
     assert f"/static/style.css?v={APP_VERSION}" in html
     assert "cdn.tailwindcss.com" not in html
+
+
+@pytest.mark.integration
+def test_static_css_401_is_not_long_cached(
+    monkeypatch: pytest.MonkeyPatch, fake_library: Path
+) -> None:
+    """認証前の 401 に immutable を付けない (401 が 1 年キャッシュされる事故防止)。"""
+    monkeypatch.setenv("FAVGALLERY_USER", "u")
+    monkeypatch.setenv("FAVGALLERY_PASSWORD", "p")
+    app = create_app(library_root=fake_library, scan_in_background=False)
+    c = TestClient(app, raise_server_exceptions=False)
+    r = c.get("/static/style.css")
+    assert r.status_code == 401
+    assert r.headers.get("Cache-Control") == "no-cache"
