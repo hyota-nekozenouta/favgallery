@@ -104,6 +104,23 @@ def test_basic_auth_favgallery_env_wins_over_archive_env(
     assert r_old.status_code == 401
 
 
+@pytest.mark.integration
+def test_basic_auth_mixed_old_new_env_pair(
+    monkeypatch: pytest.MonkeyPatch, fake_library: Path
+) -> None:
+    """Mid-migration state: each var resolves independently, so a new USER
+    paired with a legacy PASSWORD still configures auth correctly."""
+    monkeypatch.delenv("ARCHIVE_USER", raising=False)
+    monkeypatch.delenv("FAVGALLERY_PASSWORD", raising=False)
+    monkeypatch.setenv("FAVGALLERY_USER", "mixeduser")
+    monkeypatch.setenv("ARCHIVE_PASSWORD", "mixedpass")
+    app = create_app(library_root=fake_library, scan_in_background=False)
+    client = TestClient(app, raise_server_exceptions=False)
+    assert client.get("/").status_code == 401
+    r = client.get("/", headers={"Authorization": _basic_header("mixeduser", "mixedpass")})
+    assert r.status_code == 200
+
+
 @pytest.mark.unit
 def test_env_first_returns_first_non_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     from favgallery.server import _env_first
