@@ -39,6 +39,21 @@ _MSG_NO_USERNAME = (
 )
 _MSG_AUTH_FAIL = "cookie が失効・無効です。X に再ログインして cookies を更新してください。"
 _MSG_OK = "認証OK。cookie は有効です。"
+_MSG_RATE_LIMITED = (
+    "X のレート制限中です (cookie の失効とは限りません)。"
+    "15〜30 分ほど置いてから再試行してください。"
+)
+_MSG_BUSY = "同期/タイムライン取得を実行中です。完了を待ってから再試行してください。"
+
+# verify が同期実行中のロック解放を待つ最大秒数。gallery-dl は実行中ずっと
+# gdl_lock を握るため、無制限に待つと UI の接続テストが「無反応」に見える
+# (2026-06-10 接続テスト無反応 bug)。
+_GDL_LOCK_TIMEOUT_S = 5.0
+
+# レート制限の兆候 (gallery-dl の AbortExtraction メッセージ / HTTP 429)。
+# auth 判定より先に評価する — "unable to retrieve tweets" 等の曖昧な auth
+# パターンに飲み込まれて「失効」と誤案内しないため。
+_RATE_LIMIT_TOKENS = ("429", "rate limit", "ratelimit", "too many requests")
 
 
 class _CookiesBody(BaseModel):
@@ -113,7 +128,14 @@ def cookies_set(body: _CookiesBody, ctx: AppContext = Depends(get_context)) -> J
 @router.post("/api/cookies/verify")
 def cookies_verify(ctx: AppContext = Depends(get_context)) -> JSONResponse:
     """Lightweight live probe: fetch one of the user's own likes to confirm the
-    cookies actually authenticate (vs. present-but-expired)."""
+    cookies actually authenticate (vs. present-but-expired).
+
+    Interactive endpoint — must answer within seconds, never hang:
+    - gdl_lock is acquired with a timeout (a running sync holds it for minutes)
+    - the probe runs fast_fail (rate-limit abort / tight retries+timeout) so an
+      X rate-limit window doesn't read as "ボタンが効かない"
+    - rate limits are reported as such, NOT as "cookie 失効" (誤案内防止)
+    """
     if not ctx.cookies_file.exists():
         return JSONResponse({"ok": False, "auth_error": False, "message": _MSG_NOT_SET})
     username = ctx.me_username()
@@ -121,16 +143,24 @@ def cookies_verify(ctx: AppContext = Depends(get_context)) -> JSONResponse:
         return JSONResponse(
             {"ok": False, "auth_error": False, "message": _MSG_NO_USERNAME}
         )
+    if not ctx.gdl_lock.acquire(timeout=_GDL_LOCK_TIMEOUT_S):
+        return JSONResponse({"ok": False, "auth_error": False, "message": _MSG_BUSY})
     try:
-        with ctx.gdl_lock:
-            fetch_my_liked_tweet_ids(
-                ctx.gallerydl_config_path, username, range_spec="1-1"
-            )
+        fetch_my_liked_tweet_ids(
+            ctx.gallerydl_config_path, username, range_spec="1-1", fast_fail=True
+        )
     except Exception as exc:
+        text = f"{type(exc).__name__}: {exc}".lower()
+        if any(token in text for token in _RATE_LIMIT_TOKENS):
+            return JSONResponse(
+                {"ok": False, "auth_error": False, "message": _MSG_RATE_LIMITED}
+            )
         if is_auth_failure(exc):
             return JSONResponse(
                 {"ok": False, "auth_error": True, "message": _MSG_AUTH_FAIL}
             )
         msg = f"確認に失敗しました: {type(exc).__name__}: {exc}"
         return JSONResponse({"ok": False, "auth_error": False, "message": msg})
+    finally:
+        ctx.gdl_lock.release()
     return JSONResponse({"ok": True, "auth_error": False, "message": _MSG_OK})

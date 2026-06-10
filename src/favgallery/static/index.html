@@ -1837,13 +1837,26 @@ function openCookieModal() {
     } catch (e) { setMsg('✗ ' + e.message, 'error'); }
   });
 
-  modal.querySelector('#cookieVerifyBtn').addEventListener('click', async () => {
-    setMsg('接続テスト中…');
+  modal.querySelector('#cookieVerifyBtn').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    setMsg('接続テスト中…（最大 30 秒）');
+    // クライアント側の保険タイムアウト。サーバー側は lock 5s + probe fast_fail で
+    // 通常十数秒以内に返るが、万一の無応答でもボタンが固まったままにしない。
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 30000);
     try {
-      const r = await fetch('/api/cookies/verify', { method: 'POST' });
+      const r = await fetch('/api/cookies/verify', { method: 'POST', signal: ctrl.signal });
       const d = await r.json().catch(() => ({}));
       setMsg((d.ok ? '✅ ' : '✗ ') + (d.message || ''), d.ok ? 'ok' : 'error');
-    } catch (e) { setMsg('✗ ' + e.message, 'error'); }
+    } catch (err) {
+      setMsg(err.name === 'AbortError'
+        ? '✗ 時間切れ: サーバーの応答がありません。少し待ってから再試行してください'
+        : '✗ ' + err.message, 'error');
+    } finally {
+      clearTimeout(timer);
+      btn.disabled = false;
+    }
   });
 }
 

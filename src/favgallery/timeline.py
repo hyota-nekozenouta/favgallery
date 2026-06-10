@@ -77,6 +77,7 @@ def fetch_my_liked_tweet_ids(
     self_username: str,
     *,
     range_spec: str = "1-200",
+    fast_fail: bool = False,
 ) -> list[str]:
     """Scrape https://x.com/<self>/likes and return distinct tweet IDs.
 
@@ -86,7 +87,7 @@ def fetch_my_liked_tweet_ids(
     """
     url = f"https://x.com/{self_username}/likes"
     pairs = fetch_timeline_metadata(
-        gallerydl_config_path, url=url, range_spec=range_spec
+        gallerydl_config_path, url=url, range_spec=range_spec, fast_fail=fast_fail
     )
     seen: list[str] = []
     seen_set: set[str] = set()
@@ -134,6 +135,7 @@ def fetch_timeline_metadata(
     *,
     url: str = DEFAULT_TIMELINE_URL,
     range_spec: str = "1-300",
+    fast_fail: bool = False,
 ) -> list[tuple[str, dict]]:
     """Run gallery-dl in data-only mode and return (url, kwdict) pairs.
 
@@ -149,6 +151,7 @@ def fetch_timeline_metadata(
         post_range=range_spec,
         archive=None,
         twitter_retweets=True,
+        fast_fail=fast_fail,
     )
 
     sink = io.StringIO()
