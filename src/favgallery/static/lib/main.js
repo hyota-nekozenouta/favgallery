@@ -622,11 +622,34 @@ function dividerHtml() {
   return `<div class="seen-divider">📍 ここまで見た</div>`;
 }
 
+function emptyStateHtml() {
+  // Phase 5: 結果ゼロの真っ白画面を案内に変える
+  const filtered = !!(state.filter.author || state.filter.tag || state.filter.q
+    || state.filter.media_type || state.filter.list_id);
+  if (filtered) {
+    return `<div class="empty-state"><div class="glyph">∅</div>
+      <div class="title">この条件に合う投稿はありません</div>
+      <div class="hint">フィルタを外すか、別の条件をお試しください</div></div>`;
+  }
+  if (state.tab === 'timeline') {
+    return `<div class="empty-state"><div class="glyph">✦</div>
+      <div class="title">タイムラインはまだ空です</div>
+      <div class="hint">右上の「⟳ 取得」でフォロー中の投稿を読み込めます</div></div>`;
+  }
+  return `<div class="empty-state"><div class="glyph">✦</div>
+    <div class="title">まだ投稿がありません</div>
+    <div class="hint">ヘッダーの ⟳ ボタンで X のいいねを同期できます</div></div>`;
+}
+
 function appendTiles(items) {
   const m = $('#masonry');
   if (state.offset === 0) {
     m.innerHTML = '';
     state.dividerInserted = false;
+  }
+  if (!items.length && state.posts.length === 0) {
+    m.innerHTML = emptyStateHtml();
+    return;
   }
   const lastSeen = state.lastSeenTimeline;
   let html = '';
@@ -1188,16 +1211,18 @@ $$('.mt-btn').forEach(b => b.addEventListener('click', () => {
 // One shared banner. Errors (e.g. expired cookies) stay until clicked; info
 // notices auto-dismiss. Surfaces outcomes that used to fail silently.
 function showNotice(message, { kind = 'info', sticky = false, onClick = null } = {}) {
+  // Phase 5 統一トースト: 見た目は .app-toast (style.css) に集約。
+  // シグネチャと onClick/クリック消滅の挙動は従来どおり (20+ 呼び出し箇所無修正)。
   document.getElementById('appNotice')?.remove();
   const el = document.createElement('div');
   el.id = 'appNotice';
-  const palette = kind === 'error'
-    ? 'background:#7f1d1d;color:#fecaca;'
-    : 'background:#14532d;color:#bbf7d0;';
-  el.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);'
-    + palette + 'padding:8px 16px;border-radius:6px;font-size:13px;z-index:9999;'
-    + 'max-width:80%;text-align:center;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4);';
-  el.textContent = message;
+  el.className = 'app-toast' + (kind === 'error' ? ' toast-error' : '');
+  const icon = document.createElement('span');
+  icon.className = 'toast-icon';
+  icon.textContent = kind === 'error' ? '⚠' : '✦';
+  const text = document.createElement('span');
+  text.textContent = message;
+  el.append(icon, text);
   el.title = 'クリックで閉じる';
   el.onclick = () => { if (onClick) onClick(); el.remove(); };
   document.body.appendChild(el);
@@ -1326,7 +1351,9 @@ $('#optionsBtn').addEventListener('click', (e) => {
   if (!pop.classList.contains('hidden')) { pop.classList.add('hidden'); return; }
   const rect = e.currentTarget.getBoundingClientRect();
   pop.style.top = (rect.bottom + 4 + window.scrollY) + 'px';
-  pop.style.left = rect.left + 'px';
+  // ビューポートクランプ (Phase 5 スマホ操作性): 右端の ⚙ から開くと
+  // 280px 幅のポップオーバーが画面外へはみ出していた
+  pop.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 288)) + 'px';
   pop.classList.remove('hidden');
   loadCookieStatus();
 });
@@ -2217,3 +2244,37 @@ document.addEventListener('keydown', (e) => {
 
 // onclick=closeReader() の module 化代替 (Phase 4 / module scope はグローバル非公開)
 document.getElementById('readerCloseBtn')?.addEventListener('click', () => closeReader());
+
+
+// --- Phase 5 スマホ/キーボード操作性 -------------------------------------
+// Esc は「最前面のもの」から 1 つずつ閉じる (lightbox は既存ハンドラが処理)
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const cookie = document.getElementById('cookieModal');
+  if (cookie) { cookie.remove(); return; }
+  const upload = document.getElementById('bookUploadModal');
+  if (upload) { upload.remove(); return; }
+  const reader = document.getElementById('readerModal');
+  if (reader && !reader.classList.contains('hidden')) { closeReader(); return; }
+  const lp = document.getElementById('listPopover');
+  if (lp && !lp.classList.contains('hidden')) { lp.classList.add('hidden'); return; }
+  const op = document.getElementById('optionsPopover');
+  if (op && !op.classList.contains('hidden')) { op.classList.add('hidden'); }
+});
+
+// モーダル/サイドバー/リーダー/ライトボックス表示中は背面スクロールをロック。
+// 呼び出し箇所に依存しないよう MutationObserver で物理監視 (open/close 漏れゼロ)
+function syncScrollLock() {
+  const locked = !!(document.getElementById('cookieModal')
+    || document.getElementById('bookUploadModal')
+    || (document.getElementById('readerModal') && !document.getElementById('readerModal').classList.contains('hidden'))
+    || (document.getElementById('lightbox') && !document.getElementById('lightbox').classList.contains('hidden'))
+    || (document.getElementById('app-sidebar') && document.getElementById('app-sidebar').classList.contains('open')));
+  document.body.classList.toggle('scroll-locked', locked);
+}
+const _lockWatch = new MutationObserver(syncScrollLock);
+_lockWatch.observe(document.body, { childList: true });
+for (const id of ['app-sidebar', 'readerModal', 'lightbox']) {
+  const n = document.getElementById(id);
+  if (n) _lockWatch.observe(n, { attributes: true, attributeFilter: ['class'] });
+}
