@@ -12,8 +12,17 @@ const staticDir = join(root, "src", "favgallery", "static");
 let failed = false;
 
 function check(file, asModule = false) {
-  const args = asModule ? ["--input-type=module", "--check", file] : ["--check", file];
-  const r = spawnSync(process.execPath, args, { encoding: "utf-8" });
+  // --input-type=module は --check と併用不可 (Node 制約) → .mjs 一時コピーで
+  // 拡張子ベースの module パースをさせる
+  let target = file;
+  let tmp = null;
+  if (asModule) {
+    tmp = file + ".check.mjs";
+    writeFileSync(tmp, readFileSync(file, "utf-8"), "utf-8");
+    target = tmp;
+  }
+  const r = spawnSync(process.execPath, ["--check", target], { encoding: "utf-8" });
+  if (tmp) unlinkSync(tmp);
   if (r.status !== 0) {
     failed = true;
     console.error(`✗ ${file}\n${r.stderr}`);

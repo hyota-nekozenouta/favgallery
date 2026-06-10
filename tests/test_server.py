@@ -764,3 +764,23 @@ def test_static_css_401_is_not_long_cached(
     r = c.get("/static/style.css")
     assert r.status_code == 401
     assert r.headers.get("Cache-Control") == "no-cache"
+
+
+@pytest.mark.integration
+def test_main_js_module_served_no_cache(client: TestClient) -> None:
+    """Phase 4: 分割した JS モジュールは no-cache 配信 (深い import は ?v= を
+    運べないため長期キャッシュ禁止 / v0.2.3 の教訓)。"""
+    r = client.get("/static/lib/main.js")
+    assert r.status_code == 200
+    assert r.headers.get("Cache-Control") == "no-cache"
+
+
+@pytest.mark.integration
+def test_index_references_versioned_module_entry(client: TestClient) -> None:
+    from favgallery.server import APP_VERSION
+
+    html = client.get("/").text
+    assert f'<script type="module" src="/static/lib/main.js?v={APP_VERSION}"></script>' in html
+    # bootstrap (エラーレポータ + APP_VERSION) は inline に残っていること
+    assert "window.APP_VERSION" in html
+    assert "reportClientError" in html
