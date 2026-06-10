@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>FavGallery</title>
+  <link rel="preload" href="/static/fonts/fraunces-latin.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="/static/style.css?v=__APP_VERSION__" />
 </head>
 <body class="min-h-screen">
@@ -13,8 +14,8 @@
     <aside id="app-sidebar" class="w-72 border-r border-zinc-800 flex flex-col">
       <div class="px-4 py-3 border-b border-zinc-800">
         <div class="flex items-center gap-2">
-          <div class="text-lg font-semibold tracking-tight">FavGallery</div>
-          <span class="text-xs text-zinc-500" id="postCount"></span>
+          <div class="wordmark">FavGallery</div>
+          <span class="text-xs text-zinc-500 font-display" id="postCount"></span>
           <div class="flex-1"></div>
           <span id="loadingIndicator" class="hidden text-base leading-none select-none">⏳</span>
           <button id="manualSyncBtn" class="text-zinc-500 hover:text-zinc-200 text-base p-1 rounded hover:bg-zinc-800" title="今すぐ同期">⟳</button>
@@ -103,7 +104,7 @@
         <div class="flex-1"></div>
         <button id="markSeenBtn" class="hidden bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs rounded-md px-3 py-1.5" title="現在いちばん上のツイートまで「ここまで見た」マークを移動">📍 ここまで既読</button>
 <button id="timelineRefreshBtn" class="hidden bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded-md px-3 py-1.5">⟳ 取得</button>
-        <div class="text-sm text-zinc-500" id="resultCount"></div>
+        <div class="text-sm text-zinc-500 font-display" id="resultCount"></div>
       </div>
       <div id="authorHeader" class="hidden px-6 py-2 border-b border-zinc-800 flex items-center gap-3 bg-zinc-950/60">
         <div class="flex items-baseline gap-2">
