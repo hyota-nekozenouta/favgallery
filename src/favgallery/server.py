@@ -123,7 +123,7 @@ def _make_basic_auth_middleware():
             return Response(
                 content="Unauthorized",
                 status_code=401,
-                headers={"WWW-Authenticate": 'Basic realm="Archive"'},
+                headers={"WWW-Authenticate": 'Basic realm="FavGallery"'},
             )
 
         try:
@@ -133,7 +133,7 @@ def _make_basic_auth_middleware():
             return Response(
                 content="Unauthorized",
                 status_code=401,
-                headers={"WWW-Authenticate": 'Basic realm="Archive"'},
+                headers={"WWW-Authenticate": 'Basic realm="FavGallery"'},
             )
 
         user_ok = secrets.compare_digest(req_user, auth_user)
@@ -142,7 +142,7 @@ def _make_basic_auth_middleware():
             return Response(
                 content="Unauthorized",
                 status_code=401,
-                headers={"WWW-Authenticate": 'Basic realm="Archive"'},
+                headers={"WWW-Authenticate": 'Basic realm="FavGallery"'},
             )
 
         return await call_next(request)
@@ -156,7 +156,7 @@ def create_app(
     scan_in_background: bool = True,
     r2_client: R2Client | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="Archive", version="0.2.0")
+    app = FastAPI(title="FavGallery", version="0.2.0")
     app.middleware("http")(_make_basic_auth_middleware())
     # Index is built from DB (persistent). On first run or after sync,
     # local JSON sidecars are ingested into the DB. The frontend polls
@@ -172,9 +172,9 @@ def create_app(
     db = Database(library_root / "xlikes.sqlite")
     # cookies.txt lives INSIDE library_root (the Railway volume mount at
     # FAVGALLERY_LIBRARY_ROOT / legacy ARCHIVE_LIBRARY_ROOT), next to the DB,
-    # so the UI-set cookie survives
-    # redeploys. The old location (library_root.parent) sat above the volume on
-    # ephemeral container storage and was wiped on every redeploy.
+    # so the UI-set cookie survives redeploys. The old location
+    # (library_root.parent) sat above the volume on ephemeral container
+    # storage and was wiped on every redeploy.
     cookies_file = library_root / "cookies.txt"
     _migrate_legacy_cookies(library_root.parent / "cookies.txt", cookies_file)
     _write_cookies_from_env(cookies_file)

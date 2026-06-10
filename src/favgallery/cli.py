@@ -25,13 +25,13 @@ _ensure_stdio()
 
 import uvicorn  # noqa: E402
 
-from xlikes_viewer.paths import default_library_root  # noqa: E402
-from xlikes_viewer.server import create_app  # noqa: E402
+from favgallery.paths import default_library_root  # noqa: E402
+from favgallery.server import create_app  # noqa: E402
 
 
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="xlikes-viewer",
+        prog="favgallery",
         description="Browse and sync your X (Twitter) liked-media archive.",
     )
     p.add_argument("--host", default="127.0.0.1")
@@ -109,7 +109,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         import webview
 
         webview.create_window(
-            "Archive",
+            "FavGallery",
             url,
             width=1400,
             height=900,
