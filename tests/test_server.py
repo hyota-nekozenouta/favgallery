@@ -149,6 +149,23 @@ def test_index_html_served(client: TestClient) -> None:
 
 
 @pytest.mark.integration
+def test_index_injects_app_version(client: TestClient) -> None:
+    """__APP_VERSION__ プレースホルダは配信時に実バージョンへ置換される
+    (端末側にどの版が出ているか表示する遠隔診断 / 2026-06-10)。"""
+    from favgallery.server import APP_VERSION
+
+    r = client.get("/")
+    assert "__APP_VERSION__" not in r.text
+    assert f"v{APP_VERSION}" in r.text
+
+
+@pytest.mark.integration
+def test_client_log_endpoint_records_and_returns_204(client: TestClient) -> None:
+    r = client.post("/api/client-log", json={"kind": "error", "message": "boom"})
+    assert r.status_code == 204
+
+
+@pytest.mark.integration
 def test_index_is_never_cached(client: TestClient) -> None:
     """SPA シェルはキャッシュ無効で配信 — デプロイ後にスマホが古い JS を
     使い回して「直したのに挙動が変わらない」が再発しないこと (2026-06-10)。"""

@@ -338,9 +338,36 @@
       <div id="cookieStatus" class="text-zinc-500 text-xs">確認中…</div>
       <button id="cookieSetBtn" class="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded px-2 py-1 text-xs">🔑 cookies を設定 / 更新</button>
     </div>
+    <div class="px-1 pt-2 mt-2 text-[10px] text-zinc-600 border-t border-zinc-800">FavGallery v__APP_VERSION__</div>
   </div>
 
 <script>
+// __APP_VERSION__ はサーバー (server.py root()) が配信時に実バージョンへ置換する。
+// 端末側に「どの版が表示されているか」を出すため (2026-06-10 スマホキャッシュ診断)。
+window.APP_VERSION = '__APP_VERSION__';
+
+// 遠隔診断: 端末で起きた JS エラーをサーバーログへ送る。スマホなど DevTools を
+// 開けない環境の「押しても何も起きない」を Railway ログから特定する (2026-06-10)。
+function reportClientError(kind, message) {
+  try {
+    fetch('/api/client-log', {
+      method: 'POST', keepalive: true,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        v: window.APP_VERSION,
+        ua: navigator.userAgent.slice(0, 120),
+        kind,
+        message: String(message).slice(0, 500),
+      }),
+    });
+  } catch { /* 診断経路自体では落とさない */ }
+}
+window.addEventListener('error', (e) =>
+  reportClientError('error', `${e.message} @${e.filename || ''}:${e.lineno || 0}`));
+window.addEventListener('unhandledrejection', (e) =>
+  reportClientError('unhandledrejection',
+    (e.reason && (e.reason.stack || e.reason.message)) || e.reason));
+
 const state = {
   tab: 'likes',                      // 'likes' | 'timeline'
   layout: 'masonry',                 // 'masonry' | 'reel'
@@ -1780,7 +1807,7 @@ function openCookieModal() {
   modal.innerHTML = `
     <div class="bg-zinc-900 border border-zinc-800 rounded-lg w-full max-w-lg p-4 space-y-3 m-auto">
       <div class="flex items-center justify-between">
-        <div class="text-sm text-zinc-200 font-medium">X cookies の設定</div>
+        <div class="text-sm text-zinc-200 font-medium">X cookies の設定 <span class="text-zinc-600 text-xs">v__APP_VERSION__</span></div>
         <button id="cookieCloseBtn" class="text-zinc-400 hover:text-white text-xl leading-none">×</button>
       </div>
       <div id="cookieCurStatus" class="text-xs text-zinc-400">状態を確認中…</div>

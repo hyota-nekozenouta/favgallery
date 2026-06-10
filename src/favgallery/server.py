@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import secrets
 import shutil
@@ -274,9 +275,25 @@ def create_app(
     @app.get("/", response_class=HTMLResponse)
     def root() -> HTMLResponse:
         html = (static_dir / "index.html").read_text(encoding="utf-8")
+        # 端末側に表示中バージョンを出す (スマホ古キャッシュ診断 / 2026-06-10)
+        html = html.replace("__APP_VERSION__", APP_VERSION)
         # no-cache: SPA シェルを端末キャッシュさせない。デプロイ後にスマホが
         # 古い JS を使い回し「直したのに変わらない」が起きた (2026-06-10)。
         return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+    @app.post("/api/client-log")
+    async def client_log(request: Request) -> Response:
+        """端末 (主にスマホ) の JS エラーを受けてサーバーログに出す遠隔診断口。
+
+        DevTools を開けない端末の「押しても何も起きない」を Railway logs から
+        特定するため (2026-06-10)。内容は記録するだけ — 解析も保存もしない。
+        """
+        try:
+            body = (await request.body())[:2000].decode("utf-8", errors="replace")
+        except Exception:
+            body = "<unreadable>"
+        logging.getLogger("favgallery.client").warning("client-log: %s", body)
+        return Response(status_code=204)
 
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
