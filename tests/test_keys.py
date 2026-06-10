@@ -1,4 +1,4 @@
-"""Tests for xlikes_viewer.keys (R2 key derivation + media predicates)."""
+"""Tests for favgallery.keys (R2 key derivation + media predicates)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from xlikes_viewer.keys import (
+from favgallery.keys import (
     MEDIA_EXTENSIONS,
     is_media_file,
     iter_media_keys,

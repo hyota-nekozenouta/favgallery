@@ -1,4 +1,4 @@
-"""Tests for xlikes_viewer.scrapers (book-import HTML fallback)."""
+"""Tests for favgallery.scrapers (book-import HTML fallback)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from xlikes_viewer.scrapers import scrape_images_from_html
+from favgallery.scrapers import scrape_images_from_html
 
 
 class _FakeResp:
@@ -30,7 +30,7 @@ def test_routes_doujin_freee_to_dedicated_scraper(
         seen["url"] = url
         return []
 
-    monkeypatch.setattr("xlikes_viewer.scrapers.scrape_doujin_freee", _fake_doujin)
+    monkeypatch.setattr("favgallery.scrapers.scrape_doujin_freee", _fake_doujin)
     scrape_images_from_html("https://doujin-freee.cc/works/123", tmp_path)
     assert seen["url"] == "https://doujin-freee.cc/works/123"
 

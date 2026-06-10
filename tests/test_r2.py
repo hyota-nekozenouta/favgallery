@@ -1,4 +1,4 @@
-"""Tests for xlikes_viewer.r2 and R2-related server behaviour."""
+"""Tests for favgallery.r2 and R2-related server behaviour."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from xlikes_viewer.r2 import R2Config, R2Client, r2_config_from_env
-from xlikes_viewer.server import create_app
+from favgallery.r2 import R2Config, R2Client, r2_config_from_env
+from favgallery.server import create_app
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +65,7 @@ def _make_r2_client() -> tuple[R2Client, MagicMock]:
         bucket_name="bucket",
     )
     mock_s3 = MagicMock()
-    with patch("xlikes_viewer.r2.R2Client.__init__", lambda self, c: None):
+    with patch("favgallery.r2.R2Client.__init__", lambda self, c: None):
         client = R2Client.__new__(R2Client)
         client._config = cfg  # type: ignore[attr-defined]
         client._client = mock_s3  # type: ignore[attr-defined]
@@ -172,7 +172,7 @@ def test_api_media_streams_from_r2_when_configured(
     mock_r2 = MagicMock()
     mock_r2.stream_object.return_value = (5, "image/jpeg", iter([b"\xff\xd8\xff\xe0\x00"]))
 
-    with patch("xlikes_viewer.server.R2Client", return_value=mock_r2):
+    with patch("favgallery.server.R2Client", return_value=mock_r2):
         app = create_app(library_root=fake_library, scan_in_background=False)
     client = TestClient(app)
 
@@ -196,7 +196,7 @@ def test_api_media_falls_back_to_local_when_r2_raises(
     mock_r2 = MagicMock()
     mock_r2.stream_object.side_effect = Exception("NoSuchKey")
 
-    with patch("xlikes_viewer.server.R2Client", return_value=mock_r2):
+    with patch("favgallery.server.R2Client", return_value=mock_r2):
         app = create_app(library_root=fake_library, scan_in_background=False)
     client = TestClient(app)
 

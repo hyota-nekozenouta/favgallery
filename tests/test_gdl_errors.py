@@ -21,7 +21,7 @@ import logging
 import pytest
 from gallery_dl import exception as gdle
 
-from xlikes_viewer.gdl_errors import (
+from favgallery.gdl_errors import (
     AUTH_FAILURE_MESSAGE,
     capture_gdl_logs,
     detect_auth_failure,

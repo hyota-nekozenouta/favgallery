@@ -1,8 +1,8 @@
-# Archive — Railway + Cloudflare デプロイガイド
+# FavGallery — Railway + Cloudflare デプロイガイド
 
 ## 概要
 
-Archive（xlikes-viewer）を Railway に WEB アプリとしてデプロイし、Cloudflare でカスタムドメインを設定する手順。
+FavGallery（favgallery・旧名 Archive / xlikes-viewer、2026-06-10 リネーム）を Railway に WEB アプリとしてデプロイし、Cloudflare でカスタムドメインを設定する手順。
 
 ## 前提
 
@@ -49,17 +49,21 @@ Railway ダッシュボード → **Variables** タブで以下を設定する:
 
 | 変数名 | 値 | 説明 |
 |-------|-----|------|
-| `ARCHIVE_USER` | （ユーザー名） | Basic 認証のユーザー名 |
-| `ARCHIVE_PASSWORD` | （パスワード） | Basic 認証のパスワード（強いパスワードを使うこと） |
-| `ARCHIVE_LIBRARY_ROOT` | `/data/library` | メディアライブラリの保存先（ボリューム内） |
+| `FAVGALLERY_USER` | （ユーザー名） | Basic 認証のユーザー名 |
+| `FAVGALLERY_PASSWORD` | （パスワード） | Basic 認証のパスワード（強いパスワードを使うこと） |
+| `FAVGALLERY_LIBRARY_ROOT` | `/data/library` | メディアライブラリの保存先（ボリューム内） |
 | `R2_ACCOUNT_ID` | （Cloudflare アカウント ID） | R2 ストレージ用。4 変数すべて揃って初めて R2 が有効になる |
 | `R2_ACCESS_KEY_ID` | （R2 アクセスキー ID） | 同上 |
 | `R2_SECRET_ACCESS_KEY` | （R2 シークレットアクセスキー） | 同上 |
 | `R2_BUCKET_NAME` | （R2 バケット名） | 同上 |
 | `GALLERY_DL_COOKIES` | （cookies.txt の中身） | X 同期用。起動時に cookies.txt へ書き出される（§5 参照） |
 
-> `ARCHIVE_USER` と `ARCHIVE_PASSWORD` のどちらかが空の場合、認証なしで動作する。
+> `FAVGALLERY_USER` と `FAVGALLERY_PASSWORD` のどちらかが空の場合、認証なしで動作する。
 > 本番環境では必ず両方を設定すること。
+
+> 旧名 `ARCHIVE_USER` / `ARCHIVE_PASSWORD` / `ARCHIVE_LIBRARY_ROOT` も fallback として動作する
+> （2026-06-10 リネーム後方互換。新名が設定されていれば新名が優先）。Railway の env 張り替えは
+> 任意のタイミングで安全に実施できる。
 
 > `R2_*` 4 変数はいずれか 1 つでも欠けると R2 保存が無音で無効化され、メディアはボリュームにのみ
 > 保存される。漫画アップロードや同期メディアを R2 に保存するなら 4 つすべて設定すること。
@@ -145,7 +149,7 @@ railway run --service archive rsync -avz ./data/library/ /data/library/
 
 gallery-dl による X(Twitter) アクセスには `cookies.txt` が必要。
 
-**保存場所**: `cookies.txt` は `ARCHIVE_LIBRARY_ROOT` 直下（例: `/data/library/cookies.txt`）に
+**保存場所**: `cookies.txt` は `FAVGALLERY_LIBRARY_ROOT` 直下（例: `/data/library/cookies.txt`）に
 DB と並んで置かれる。**ボリューム内なので再デプロイしても消えない**。
 （旧バージョンは `library_root` の一つ上＝`/data/cookies.txt` に置いており、ボリュームの外だったため
 再デプロイのたびに消えていた。起動時に旧パスへ残っていれば新パスへ自動移行する。）
@@ -171,11 +175,11 @@ cd projects/archive
 uv sync
 
 # 起動（認証あり・ポート 8000）
-ARCHIVE_USER=admin ARCHIVE_PASSWORD=mysecretpassword \
-  PYTHONPATH=src uv run uvicorn xlikes_viewer.server:app --host 0.0.0.0 --port 8000
+FAVGALLERY_USER=admin FAVGALLERY_PASSWORD=mysecretpassword \
+  PYTHONPATH=src uv run uvicorn favgallery.server:app --host 0.0.0.0 --port 8000
 
 # ブラウザで http://localhost:8000 にアクセス → Basic 認証ダイアログが表示される
 ```
 
-> Windows PowerShell では行頭の `VAR=値` 形式が使えない。`$env:ARCHIVE_USER="admin"` のように
+> Windows PowerShell では行頭の `VAR=値` 形式が使えない。`$env:FAVGALLERY_USER="admin"` のように
 > 事前に設定してから `uv run ...` を実行する。

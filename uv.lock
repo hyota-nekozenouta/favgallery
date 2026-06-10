@@ -331,6 +331,66 @@ wheels = [
 ]
 
 [[package]]
+name = "favgallery"
+version = "0.2.0"
+source = { editable = "." }
+dependencies = [
+    { name = "beautifulsoup4" },
+    { name = "boto3" },
+    { name = "fastapi" },
+    { name = "gallery-dl" },
+    { name = "httpx" },
+    { name = "imagehash" },
+    { name = "pillow" },
+    { name = "python-multipart" },
+    { name = "requests" },
+    { name = "uvicorn" },
+]
+
+[package.optional-dependencies]
+cloud = [
+    { name = "boto3" },
+]
+desktop = [
+    { name = "pywebview" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "pyinstaller" },
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "beautifulsoup4", specifier = ">=4.12" },
+    { name = "boto3", specifier = ">=1.38.0" },
+    { name = "boto3", marker = "extra == 'cloud'", specifier = ">=1.38.0" },
+    { name = "fastapi", specifier = ">=0.136.1" },
+    { name = "gallery-dl", specifier = ">=1.32.1" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "imagehash", specifier = ">=4.3.2" },
+    { name = "pillow", specifier = ">=12.2.0" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
+    { name = "pywebview", marker = "extra == 'desktop'", specifier = ">=6.2.1" },
+    { name = "requests", specifier = ">=2.31" },
+    { name = "uvicorn", specifier = ">=0.46.0" },
+]
+provides-extras = ["desktop", "cloud"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "pyinstaller", specifier = ">=6.20.0" },
+    { name = "pytest", specifier = ">=9.0.3" },
+    { name = "pytest-cov", specifier = ">=7.1.0" },
+    { name = "ruff", specifier = ">=0.15.12" },
+]
+
+[[package]]
 name = "gallery-dl"
 version = "1.32.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1189,64 +1249,4 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/1f/93/041fca8274050e40e6791f267d82e0e2e27dd165627bd640d3e0e378d877/uvicorn-0.46.0.tar.gz", hash = "sha256:fb9da0926999cc6cb22dc7cd71a94a632f078e6ae47ff683c5c420750fb7413d", size = 88758, upload-time = "2026-04-23T07:16:00.151Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/31/a3/5b1562db76a5a488274b2332a97199b32d0442aca0ed193697fd47786316/uvicorn-0.46.0-py3-none-any.whl", hash = "sha256:bbebbcbed972d162afca128605223022bedd345b7bc7855ce66deb31487a9048", size = 70926, upload-time = "2026-04-23T07:15:58.355Z" },
-]
-
-[[package]]
-name = "xlikes-viewer"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "beautifulsoup4" },
-    { name = "boto3" },
-    { name = "fastapi" },
-    { name = "gallery-dl" },
-    { name = "httpx" },
-    { name = "imagehash" },
-    { name = "pillow" },
-    { name = "python-multipart" },
-    { name = "requests" },
-    { name = "uvicorn" },
-]
-
-[package.optional-dependencies]
-cloud = [
-    { name = "boto3" },
-]
-desktop = [
-    { name = "pywebview" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "httpx" },
-    { name = "pyinstaller" },
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "beautifulsoup4", specifier = ">=4.12" },
-    { name = "boto3", specifier = ">=1.38.0" },
-    { name = "boto3", marker = "extra == 'cloud'", specifier = ">=1.38.0" },
-    { name = "fastapi", specifier = ">=0.136.1" },
-    { name = "gallery-dl", specifier = ">=1.32.1" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "imagehash", specifier = ">=4.3.2" },
-    { name = "pillow", specifier = ">=12.2.0" },
-    { name = "python-multipart", specifier = ">=0.0.20" },
-    { name = "pywebview", marker = "extra == 'desktop'", specifier = ">=6.2.1" },
-    { name = "requests", specifier = ">=2.31" },
-    { name = "uvicorn", specifier = ">=0.46.0" },
-]
-provides-extras = ["desktop", "cloud"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "pyinstaller", specifier = ">=6.20.0" },
-    { name = "pytest", specifier = ">=9.0.3" },
-    { name = "pytest-cov", specifier = ">=7.1.0" },
-    { name = "ruff", specifier = ">=0.15.12" },
 ]

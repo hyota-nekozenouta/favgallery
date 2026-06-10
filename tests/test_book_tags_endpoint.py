@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from xlikes_viewer.server import create_app
+from favgallery.server import create_app
 
 
 def _png_bytes(seed: int, size: int = 128) -> bytes:
