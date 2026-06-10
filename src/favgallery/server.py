@@ -88,6 +88,21 @@ def _ensure_gallerydl_config(config_path: Path, library_root: Path) -> None:
     write_gallerydl_config(config_path, library_root)
 
 
+def _resolve_app_version() -> str:
+    """Installed package version — single source of truth is pyproject.toml."""
+    try:
+        from importlib.metadata import version
+
+        return version("favgallery")
+    except Exception:  # PackageNotFoundError 等 — 開発ツリー直実行
+        return "dev"
+
+
+#: Sent as X-App-Version on every response (401 含む) so the deployed version
+#: is externally verifiable without credentials (2026-06-10 デプロイ検証盲点).
+APP_VERSION = _resolve_app_version()
+
+
 def _env_first(*names: str) -> str:
     """Return the first non-empty value among the given env var names.
 
@@ -156,8 +171,17 @@ def create_app(
     scan_in_background: bool = True,
     r2_client: R2Client | None = None,
 ) -> FastAPI:
-    app = FastAPI(title="FavGallery", version="0.2.0")
+    app = FastAPI(title="FavGallery", version=APP_VERSION)
     app.middleware("http")(_make_basic_auth_middleware())
+
+    # Outermost middleware (last added runs first): version-stamp every response,
+    # including the auth middleware's 401s.
+    @app.middleware("http")
+    async def add_version_header(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-App-Version"] = APP_VERSION
+        return response
+
     # Index is built from DB (persistent). On first run or after sync,
     # local JSON sidecars are ingested into the DB. The frontend polls
     # `scanning=True` via /api/library until the initial load completes.
@@ -250,7 +274,9 @@ def create_app(
     @app.get("/", response_class=HTMLResponse)
     def root() -> HTMLResponse:
         html = (static_dir / "index.html").read_text(encoding="utf-8")
-        return HTMLResponse(html)
+        # no-cache: SPA シェルを端末キャッシュさせない。デプロイ後にスマホが
+        # 古い JS を使い回し「直したのに変わらない」が起きた (2026-06-10)。
+        return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")

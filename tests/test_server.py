@@ -149,6 +149,35 @@ def test_index_html_served(client: TestClient) -> None:
 
 
 @pytest.mark.integration
+def test_index_is_never_cached(client: TestClient) -> None:
+    """SPA シェルはキャッシュ無効で配信 — デプロイ後にスマホが古い JS を
+    使い回して「直したのに挙動が変わらない」が再発しないこと (2026-06-10)。"""
+    r = client.get("/")
+    assert r.headers.get("Cache-Control") == "no-cache"
+
+
+@pytest.mark.integration
+def test_all_responses_carry_app_version_header(
+    monkeypatch: pytest.MonkeyPatch, fake_library: Path
+) -> None:
+    """X-App-Version を全応答に付与 — 認証前の 401 にも付くので、本番にどの
+    版が出ているか外部から確認できる (デプロイ検証の盲点解消 / 2026-06-10)。"""
+    from favgallery.server import APP_VERSION
+
+    assert APP_VERSION and APP_VERSION != ""
+    monkeypatch.setenv("FAVGALLERY_USER", "u")
+    monkeypatch.setenv("FAVGALLERY_PASSWORD", "p")
+    app = create_app(library_root=fake_library, scan_in_background=False)
+    client = TestClient(app, raise_server_exceptions=False)
+    r401 = client.get("/")
+    assert r401.status_code == 401
+    assert r401.headers.get("X-App-Version") == APP_VERSION
+    r200 = client.get("/", headers={"Authorization": _basic_header("u", "p")})
+    assert r200.status_code == 200
+    assert r200.headers.get("X-App-Version") == APP_VERSION
+
+
+@pytest.mark.integration
 def test_library_endpoint_lists_authors_and_tags(client: TestClient) -> None:
     r = client.get("/api/library")
     assert r.status_code == 200

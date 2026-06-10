@@ -1780,9 +1780,11 @@ function openCookieModal() {
         <div class="text-sm text-zinc-200 font-medium">X cookies の設定</div>
         <button id="cookieCloseBtn" class="text-zinc-400 hover:text-white text-xl leading-none">×</button>
       </div>
+      <div id="cookieCurStatus" class="text-xs text-zinc-400">状態を確認中…</div>
       <p class="text-xs text-zinc-500 leading-relaxed">
         ブラウザ拡張などで書き出した <code>cookies.txt</code>（Netscape 形式）の中身を貼り付けるか、
         ファイルを選択してください。保存先は永続ストレージで再デプロイ不要。失効したらここで貼り替えれば復旧します。
+        <span class="text-zinc-600">※ セキュリティのため保存済みの中身は表示されません（入力欄は常に空です）。</span>
       </p>
       <textarea id="cookieText" rows="7" spellcheck="false"
         class="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1.5 text-xs font-mono focus:outline-none focus:border-indigo-500"
@@ -1805,6 +1807,22 @@ function openCookieModal() {
   const close = () => modal.remove();
   modal.querySelector('#cookieCloseBtn').addEventListener('click', close);
   modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+
+  // サーバー側の保存状態を表示（入力欄は秘密保護のため常に空 = 未保存と誤解しやすい）
+  (async () => {
+    const el = modal.querySelector('#cookieCurStatus');
+    try {
+      const s = await (await fetch('/api/cookies/status')).json();
+      if (s.configured) {
+        const when = s.updated_at ? new Date(s.updated_at * 1000).toLocaleString('ja-JP') : '不明';
+        el.textContent = `✅ サーバーに cookies 保存済み（更新: ${when}）` + (s.looks_valid ? '' : ' ⚠️ 形式が不正の可能性');
+        el.style.color = '#86efac';
+      } else {
+        el.textContent = '⚠️ サーバーに cookies 未保存 — 下に貼り付けて保存してください';
+        el.style.color = '#fcd34d';
+      }
+    } catch { el.textContent = '状態の取得に失敗しました'; }
+  })();
 
   const msg = modal.querySelector('#cookieMsg');
   const setMsg = (text, kind) => {
