@@ -122,11 +122,19 @@ def cookies_set(body: _CookiesBody, ctx: AppContext = Depends(get_context)) -> J
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(normalised)
+            # fsync before the rename becomes visible: without it a host crash
+            # in the page-cache window could leave a zero-byte cookies.txt.
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except OSError as exc:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         return JSONResponse({"detail": f"保存に失敗しました: {exc}"}, status_code=500)
+    # Push the fresh jar into the live CdnProxy — sync/timeline/verify re-read
+    # cookies.txt per call, but the proxy holds a long-lived client that would
+    # otherwise keep sending the dead cookie until a container restart.
+    ctx.cdn_proxy.reload_cookies()
     _log.info("cookies saved (size=%d)", len(normalised))
     return JSONResponse(_status_payload(ctx))
 
@@ -168,7 +176,9 @@ def cookies_verify(ctx: AppContext = Depends(get_context)) -> JSONResponse:
             return JSONResponse(
                 {"ok": False, "auth_error": True, "message": _MSG_AUTH_FAIL}
             )
-        msg = f"確認に失敗しました: {type(exc).__name__}: {exc}"
+        # Exception text can carry internals (file paths, upstream response
+        # snippets) — log it server-side, return only the exception type.
+        msg = f"確認に失敗しました ({type(exc).__name__})。詳細はサーバーログを確認してください。"
         _log.info("verify result: error (%s)", text[:200])
         return JSONResponse({"ok": False, "auth_error": False, "message": msg})
     finally:

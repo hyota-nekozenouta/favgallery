@@ -49,8 +49,25 @@ class CdnProxy:
         self.cookies_file = cookies_file
         self._cookies = _load_cookies(cookies_file)
         self._client: httpx.AsyncClient | None = None
+        # Generation counter: bumped by reload_cookies() (sync, from the cookie
+        # paste endpoint), consumed by _ensure_client() (async, in the event
+        # loop). The stale client was the "re-pasted cookies but proxied media
+        # still 403s until restart" bug — the jar was baked into the client at
+        # startup and never refreshed.
+        self._generation = 0
+        self._client_generation = 0
+
+    def reload_cookies(self) -> None:
+        """Re-read cookies.txt; the next request rebuilds the client with it."""
+        self._cookies = _load_cookies(self.cookies_file)
+        self._generation += 1
 
     async def _ensure_client(self) -> httpx.AsyncClient:
+        if self._client is not None and self._client_generation != self._generation:
+            stale, self._client = self._client, None
+            # May briefly cut a stream that is mid-flight at paste time; that
+            # request was using the dead cookie anyway.
+            await stale.aclose()
         if self._client is None:
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(30.0, connect=10.0),
@@ -58,6 +75,7 @@ class CdnProxy:
                 cookies=self._cookies,
                 headers={"User-Agent": "Mozilla/5.0 (favgallery)"},
             )
+            self._client_generation = self._generation
         return self._client
 
     async def aclose(self) -> None:
