@@ -41,8 +41,17 @@ export async function notifyAuthFailure() {
       _authNoticeShown = false;
       return;
     }
+    if (!v.auth_error) {
+      // 失効と「確認できていない」だけ（同期実行中 / X レート制限 / probe 失敗）。
+      // ok 以外を全部「失効」赤バナーに倒していたのを修正 — 失効と実確認できた
+      // (auth_error:true) 時だけ脅す (2026-06-11 誤案内根治。verify の message を
+      // そのまま流す: busy/レート制限の文言はサーバー側が一元管理)
+      showNotice('取得に失敗しました。' + (v.message || '時間を置いて再試行してください。'), { kind: 'info' });
+      _authNoticeShown = false;
+      return;
+    }
   } catch { /* verify 自体が通信失敗 → 従来どおり警告側に倒す */ }
-  // 本当に失効 or 判定不能 → 従来の sticky バナー（タップで設定モーダルを開く）
+  // 失効を実確認 or 判定不能 → 従来の sticky バナー（タップで設定モーダルを開く）
   showNotice(COOKIE_EXPIRED_MSG + '（タップで設定を開く）', {
     kind: 'error', sticky: true, onClick: openCookieModal,
   });
