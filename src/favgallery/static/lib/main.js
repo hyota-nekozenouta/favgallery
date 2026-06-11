@@ -29,6 +29,7 @@ function switchTab(tab) {
   state.offset = 0; state.posts = []; state.dividerInserted = false;
   setupSeenObserver();          // turn observer on for timeline, off otherwise
   if (tab === 'bookshelf') {
+    $('#masonry').classList.remove('masonry-js');  // 本棚は CSS columns 表示。列 flex を解除
     $('#masonry').innerHTML = '';
     fetchBooks();
     loadBookTags();

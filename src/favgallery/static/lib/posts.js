@@ -9,6 +9,107 @@ import { openLightbox, renderLightbox } from 'lightbox';
 import { openListPopover } from 'popovers';
 import { observeNewTiles } from 'timeline';
 
+// --- 連続マソンリー: JS 列コンテナ -----------------------------------
+// CSS columns は新タイル追加のたび全タイルを各列へ流し直す（再分配）ため、無限
+// スクロール中に「見ていた位置がずれる」。これを根治するため #masonry を列数ぶんの
+// .mcol に分け、新タイルは「いちばん背が低い列」の下端へ積む。既存タイルは DOM 移動
+// しないのでスクロール位置が完全に保たれる。(2026-06-11 位置ずれバグ修正)
+let _cols = [];          // [{ el, h }]  各列の DOM と推定累積高さ（アスペクト比の和）
+let _colCount = 0;       // 現在の列数 (2/3/4)
+const DEFAULT_ASPECT = 1.25;          // メタ欠損時のフォールバック比 (height/width)
+const VIDEO_DEFAULT_ASPECT = 9 / 16;  // 動画メタ欠損時（横長想定）
+
+// CSS の column-count ブレークポイント (768/1024/1700) を JS にミラー。
+function _currentColCount() {
+  const w = window.innerWidth;
+  if (w >= 1700) return 4;
+  if (w >= 1024) return 3;
+  return 2;
+}
+
+// 列幅は CSS(flex:1) 任せなので絶対 px は不要。全列同幅ゆえアスペクト比(高さ/幅)を
+// 「相対高さ」の代理として積むだけで最短列の順位は正しく決まる。
+function _estTileHeight(p) {
+  if (p.width && p.height && p.width > 0) return p.height / p.width;
+  const isVideo = p.media_type === 'video' || p.extension === 'mp4';
+  return isVideo ? VIDEO_DEFAULT_ASPECT : DEFAULT_ASPECT;
+}
+
+function _shortestCol() {
+  let min = 0;
+  for (let i = 1; i < _cols.length; i++) if (_cols[i].h < _cols[min].h) min = i;
+  return min;
+}
+
+function _makeCols(n) {
+  const m = $('#masonry');
+  const cols = [];
+  for (let i = 0; i < n; i++) {
+    const c = document.createElement('div');
+    c.className = 'mcol';
+    m.appendChild(c);
+    cols.push({ el: c, h: 0 });
+  }
+  return cols;
+}
+
+function _buildColumns(n) {
+  const m = $('#masonry');
+  m.innerHTML = '';
+  m.classList.add('masonry-js');
+  _colCount = n;
+  _cols = _makeCols(n);
+}
+
+function _teardownColumns() {
+  $('#masonry').classList.remove('masonry-js');
+  _cols = [];
+  _colCount = 0;
+}
+
+// timeline「📍ここまで見た」境界。列分割下では全幅の水平線（flex-basis:100%）で引き、
+// 線の前後で列セットを分ける（線以降は高さ 0 の新しい列へ積む）。
+function _insertDividerBarrier() {
+  $('#masonry').insertAdjacentHTML('beforeend',
+    `<div class="seen-divider seen-divider-barrier">📍 ここまで見た</div>`);
+  _cols = _makeCols(_colCount);
+}
+
+// delete/unlike 後の data-idx 振り直し。DOM 順（列ごと）に依存せず、削除した論理
+// インデックスより大きい data-idx だけを 1 つ詰める。列分割でも 1 列でも正しい。
+function _reindexAfterRemoval(removedIdx) {
+  $$('#masonry .tile, #masonry .reel-item').forEach(node => {
+    const v = parseInt(node.dataset.idx, 10);
+    if (v > removedIdx) node.dataset.idx = v - 1;
+  });
+}
+
+// ウィンドウ幅で列数が変わったら全タイルを新列数へ再配置（リサイズはユーザー操作
+// 起因なので既存が動いてよい）。既存ノードを appendChild で「移動」するだけなので
+// 画像は再ロードされず bind/observer も保たれる。
+let _resizeTimer = null;
+function _reflowColumns() {
+  if (!_cols.length) return;
+  const want = _currentColCount();
+  if (want === _colCount) return;
+  // data-idx 昇順で論理順を復元してから配置（DOM 順は列ごとで論理順と一致しない）。
+  const tiles = $$('#masonry .tile').sort(
+    (a, b) => parseInt(a.dataset.idx, 10) - parseInt(b.dataset.idx, 10)
+  );
+  _buildColumns(want);
+  for (const el of tiles) {
+    const col = _cols[_shortestCol()];
+    col.el.appendChild(el);
+    const p = state.posts[parseInt(el.dataset.idx, 10)];
+    if (p) col.h += _estTileHeight(p);
+  }
+}
+window.addEventListener('resize', () => {
+  if (state.layout !== 'masonry' || state.tab === 'bookshelf' || state.unliked.active) return;
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(_reflowColumns, 200);
+});
+
 // --- Video thumbnail capture (Canvas API) -------------------------
 const videoCapObserver = new IntersectionObserver((entries) => {
   entries.forEach(e => {
@@ -51,6 +152,7 @@ export async function enterUnlikedMode(author) {
     hasMore: false, loading: true, loadingMore: false, error: '',
   };
   // Replace grid contents with a loading placeholder.
+  _teardownColumns();   // 未いいねは 1 列直積み。連続マソンリーの flex 列を解除
   $('#masonry').innerHTML = `<div class="text-zinc-400 text-sm p-6">⏳ X から @${escapeHtml(author)} の投稿を取得中… (10〜20秒かかることがあります)</div>`;
   $('#resultCount').textContent = '取得中…';
   renderAuthorHeader();
@@ -121,6 +223,7 @@ function updateUnlikedCountLabel() {
 function renderUnlikedGrid() {
   const items = state.unliked.items;
   const m = $('#masonry');
+  _teardownColumns();   // 未いいねは 1 列直積み（flex 列を解除）
   if (items.length === 0 && !state.unliked.hasMore) {
     m.innerHTML = `<div class="text-zinc-400 text-sm p-6">未いいねの投稿はありません。</div>`;
     $('#resultCount').textContent = '0 件 (未いいね)';
@@ -159,11 +262,10 @@ function dropUnlikedByTweetId(tweetId) {
     const tile = document.querySelector(`#masonry .tile[data-idx="${i}"], #masonry .reel-item[data-idx="${i}"]`);
     if (tile && tile.parentNode) tile.parentNode.removeChild(tile);
     u.items.splice(i, 1);
+    _reindexAfterRemoval(i);
     removed++;
   }
   if (removed === 0) return;
-  // Re-number remaining tiles so their data-idx still maps to items[].
-  $$('#masonry .tile, #masonry .reel-item').forEach((node, i) => { node.dataset.idx = i; });
   updateUnlikedCountLabel();
   // Top up if we just emptied the visible list but more pages exist.
   if (u.items.length === 0 && u.hasMore) loadMoreUnliked();
@@ -218,6 +320,7 @@ export async function fetchPosts() {
   const masonryEl = document.getElementById('masonry');
   const showSkeleton = state.offset === 0 && masonryEl && !masonryEl.children.length;
   if (showSkeleton) {
+    _teardownColumns();   // skeleton は CSS columns で見せる（flex の .masonry-js を外す）
     masonryEl.innerHTML = Array.from({ length: 12 }, (_, i) =>
       `<div class="tile-skeleton" style="height:${160 + (i % 4) * 60}px"></div>`
     ).join('');
@@ -254,10 +357,6 @@ export function compareIds(a, b) {
   }
 }
 
-function dividerHtml() {
-  return `<div class="seen-divider">📍 ここまで見た</div>`;
-}
-
 function emptyStateHtml() {
   // Phase 5: 結果ゼロの真っ白画面を案内に変える
   const filtered = !!(state.filter.author || state.filter.tag || state.filter.q
@@ -278,8 +377,49 @@ function emptyStateHtml() {
 }
 
 function appendTiles(items) {
+  return state.layout === 'reel' ? _appendReelTiles(items) : _appendMasonryTiles(items);
+}
+
+// 連続マソンリー: 新タイルを最短列の下端へ積む（既存タイルは DOM 移動しない）。
+function _appendMasonryTiles(items) {
   const m = $('#masonry');
   if (state.offset === 0) {
+    state.dividerInserted = false;
+    _buildColumns(_currentColCount());
+  }
+  if (!items.length && state.posts.length === 0) {
+    _teardownColumns();
+    m.innerHTML = emptyStateHtml();
+    return;
+  }
+  if (!_cols.length) _buildColumns(_currentColCount());   // 念のための再構築ガード
+  const lastSeen = state.lastSeenTimeline;
+  const newTiles = [];
+  for (let i = 0; i < items.length; i++) {
+    const p = items[i];
+    const idx = state.posts.length - items.length + i;
+    if (
+      state.tab === 'timeline' && lastSeen && !state.dividerInserted &&
+      compareIds(p.tweet_id, lastSeen) <= 0
+    ) {
+      _insertDividerBarrier();
+      state.dividerInserted = true;
+    }
+    const col = _cols[_shortestCol()];
+    col.el.insertAdjacentHTML('beforeend', tileHtml(p, idx));
+    col.h += _estTileHeight(p);
+    newTiles.push(col.el.lastElementChild);
+  }
+  if (state.tab === 'timeline') observeNewTiles(newTiles);
+  $$('#masonry img[data-video-src]:not([data-vcap])').forEach(img => videoCapObserver.observe(img));
+  _bindTiles(newTiles);
+}
+
+// リール: 1 列縦積み（列分割しない）。従来どおり #masonry へ直接 append。
+function _appendReelTiles(items) {
+  const m = $('#masonry');
+  if (state.offset === 0) {
+    _teardownColumns();
     m.innerHTML = '';
     state.dividerInserted = false;
   }
@@ -297,24 +437,22 @@ function appendTiles(items) {
       state.tab === 'timeline' && lastSeen && !state.dividerInserted &&
       compareIds(p.tweet_id, lastSeen) <= 0
     ) {
-      if (state.layout !== 'reel') {
-        html += dividerHtml();
-      } else {
-        isSeenBoundary = true;
-      }
+      isSeenBoundary = true;
       state.dividerInserted = true;
     }
-    html += state.layout === 'reel' ? reelItemHtml(p, idx, isSeenBoundary) : tileHtml(p, idx);
+    html += reelItemHtml(p, idx, isSeenBoundary);
   }
   m.insertAdjacentHTML('beforeend', html);
-  const tileSelector = state.layout === 'reel'
-    ? '#masonry .reel-item:not([data-bound])'
-    : '#masonry .tile:not([data-bound])';
-  const newTiles = $$(tileSelector);
+  const newTiles = $$('#masonry .reel-item:not([data-bound])');
   if (state.tab === 'timeline') observeNewTiles(newTiles);
-  if (state.layout === 'reel') setupReelObserver();
+  setupReelObserver();
   $$('#masonry img[data-video-src]:not([data-vcap])').forEach(img => videoCapObserver.observe(img));
-  newTiles.forEach(el => {
+  _bindTiles(newTiles);
+}
+
+// タイル/リール共通のイベント bind（click→lightbox / add / like / del）。
+function _bindTiles(tiles) {
+  tiles.forEach(el => {
     el.dataset.bound = '1';
     el.addEventListener('click', (e) => {
       if (e.target.classList.contains('add-btn')) return;
@@ -330,8 +468,7 @@ function appendTiles(items) {
     const lb = el.querySelector('.like-btn');
     if (lb) lb.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const idx = parseInt(el.dataset.idx, 10);
-      await likeAndSave(idx, lb);
+      await likeAndSave(parseInt(el.dataset.idx, 10), lb);
     });
     const db = el.querySelector('.del-btn');
     if (db) db.addEventListener('click', async (e) => {
@@ -355,8 +492,8 @@ export async function deletePost(idx, tileEl) {
   state.total = Math.max(0, state.total - 1);
   $('#resultCount').textContent = `${state.total.toLocaleString()} 件`;
   if (tileEl && tileEl.parentNode) tileEl.parentNode.removeChild(tileEl);
-  // Reindex remaining tiles' data-idx so subsequent clicks still find the right post.
-  $$('#masonry .tile, #masonry .reel-item').forEach((node, i) => { node.dataset.idx = i; });
+  // data-idx を詰める（列分割でも 1 列でも正しい数値方式 / DOM 順非依存）。
+  _reindexAfterRemoval(idx);
 }
 
 async function likeAndSave(idx, btn) {

@@ -45,6 +45,26 @@ body {
 @media (min-width: 1280px) { .masonry { column-count: 3; } }
 @media (min-width: 1700px) { .masonry { column-count: 4; } }
 
+/* ---- 連続マソンリー: JS 列コンテナ ----
+   CSS columns は新タイル追加のたび全タイルを各列へ流し直す（再分配）ため、無限
+   スクロール中に見ていた位置がずれる。.masonry-js を付けたときは flex の列コンテナ
+   (.mcol) に切り替え、新タイルを各列の下端へ積む方式にして既存タイルを固定する。
+   (2026-06-11 位置ずれバグ修正) */
+.masonry.masonry-js {
+  column-count: unset; column-gap: normal;
+  display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px;
+}
+.masonry.masonry-js .mcol {
+  flex: 1 1 0; min-width: 0;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.masonry-js .tile { margin-bottom: 0; }            /* 余白は親の gap に一本化 */
+.seen-divider-barrier { flex-basis: 100%; width: 100%; }  /* 列をまたぐ全幅の既読ライン */
+@media (max-width: 767px) {
+  .masonry.masonry-js { gap: 10px; }
+  .masonry.masonry-js .mcol { gap: 10px; }
+}
+
 /* ---- タイル: 額装された作品 ---- */
 .tile { break-inside: avoid; margin-bottom: 14px; position: relative; border-radius: 12px; }
 .tile img, .tile video {
