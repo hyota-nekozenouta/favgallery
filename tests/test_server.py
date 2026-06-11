@@ -568,7 +568,9 @@ def test_gallery_dl_cookies_env_writes_cookies_file(
     """GALLERY_DL_COOKIES env var content must be written to cookies.txt at startup."""
     cookies_path = fake_library / "cookies.txt"
     assert not cookies_path.exists()
-    cookie_content = "# Netscape HTTP Cookie File\nexample.com\tFALSE\t/\tFALSE\t0\tsession\tabc123\n"
+    cookie_content = (
+        "# Netscape HTTP Cookie File\nexample.com\tFALSE\t/\tFALSE\t0\tsession\tabc123\n"
+    )
     monkeypatch.setenv("GALLERY_DL_COOKIES", cookie_content)
     create_app(library_root=fake_library, scan_in_background=False)
     assert cookies_path.exists()
@@ -662,7 +664,7 @@ def test_legacy_cookies_migrated_into_library_root(
 def test_ensure_gallerydl_config_written_in_nonportable_env(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path, tmp_path: Path
 ) -> None:
-    """_ensure_gallerydl_config must write gallery-dl.json when portable_root() is None (Railway)."""
+    """_ensure_gallerydl_config writes gallery-dl.json when portable_root() is None (Railway)."""
     from favgallery import server as server_module
     from favgallery.server import _ensure_gallerydl_config
 
@@ -685,7 +687,7 @@ def test_ensure_gallerydl_config_written_in_nonportable_env(
 def test_gallerydl_config_path_is_under_data_in_nonportable_env(
     fake_library: Path
 ) -> None:
-    """In non-frozen env (Railway-equivalent), gallery-dl.json must be at library_root.parent/config/."""
+    """Non-frozen env (Railway-equivalent): gallery-dl.json sits at library_root.parent/config/."""
     # portable_root() naturally returns None in the test environment (not frozen).
     app = create_app(library_root=fake_library, scan_in_background=False)
     cfg_path: Path = app.state.timeline_refresher.gallerydl_config_path  # type: ignore[attr-defined]

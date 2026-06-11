@@ -8,9 +8,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from favgallery.r2 import R2Config, R2Client, r2_config_from_env
+from favgallery.r2 import R2Client, R2Config, r2_config_from_env
 from favgallery.server import create_app
-
 
 # ---------------------------------------------------------------------------
 # r2_config_from_env
@@ -118,9 +117,8 @@ def test_r2_client_raises_import_error_without_boto3() -> None:
     cfg = R2Config(
         account_id="a", access_key_id="k", secret_access_key="s", bucket_name="b"
     )
-    with patch.dict("sys.modules", {"boto3": None}):
-        with pytest.raises(ImportError, match="boto3"):
-            R2Client(cfg)
+    with patch.dict("sys.modules", {"boto3": None}), pytest.raises(ImportError, match="boto3"):
+        R2Client(cfg)
 
 
 # ---------------------------------------------------------------------------
