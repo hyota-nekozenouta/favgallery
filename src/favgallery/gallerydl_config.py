@@ -31,6 +31,13 @@ def build_sync_config(library_root: Path, ffmpeg_location: str) -> dict:
                 # next to the DB, so it survives redeploys. Must match the path
                 # computed in server.create_app (ctx.cookies_file).
                 "cookies": _fwd(library_root / "cookies.txt"),
+                # Never write the live session jar back to cookies.txt.
+                # gallery-dl defaults cookies-update to True: after each run it
+                # rewrites cookies.txt with the session cookies X returned. On a
+                # datacenter IP that session is degraded/short-lived, so the
+                # write-back clobbered the pristine UI-pasted cookie and auth
+                # "broke again" minutes later. UI stays the source of truth.
+                "cookies-update": False,
                 "videos": True,
                 "retweets": False,
                 "text-tweets": False,
