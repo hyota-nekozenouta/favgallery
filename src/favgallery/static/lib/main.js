@@ -1,6 +1,6 @@
 // エントリポイント: タブ切替 / 起動処理 / グローバル UI (サイドバー・無限スクロール・
 // Esc・スクロールロック)。機能本体は各モジュールに分離済み (Phase 4B)。
-// index.html の import map が bare specifier を ?v=__ASSET_VERSION__ 付き URL へ解決する。
+// index.html の import map が bare specifier を ?v= 資産ハッシュ付き URL へ解決する。
 import { state } from 'state';
 import { $, $$ } from 'dom';
 import { showNotice } from 'notices';

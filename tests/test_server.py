@@ -796,6 +796,24 @@ def test_main_js_module_served_no_cache(client: TestClient) -> None:
 
 
 @pytest.mark.integration
+def test_static_lib_js_has_no_version_placeholder() -> None:
+    """lib/*.js に __APP_VERSION__ / __ASSET_VERSION__ リテラルを書かない (regression)。
+
+    サーバーの置換は index.html 配信時 (root()) のみ — /static 配下は無置換配信
+    なので、静的 JS にプレースホルダを書くと画面に生文字列が出る (Phase 4A で
+    cookie モーダルの版表示が「v__APP_VERSION__」になった生表示バグ / 2026-06-11
+    修正)。版表示は window.APP_VERSION (index.html inline で置換済み) を使うこと。"""
+    lib_dir = Path(__file__).resolve().parents[1] / "src" / "favgallery" / "static" / "lib"
+    offenders = [
+        f.name
+        for f in sorted(lib_dir.glob("*.js"))
+        if "__APP_VERSION__" in f.read_text(encoding="utf-8")
+        or "__ASSET_VERSION__" in f.read_text(encoding="utf-8")
+    ]
+    assert offenders == [], f"placeholder in static js (use window.APP_VERSION): {offenders}"
+
+
+@pytest.mark.integration
 def test_index_references_versioned_module_entry(client: TestClient) -> None:
     # モジュール URL の ?v= も ASSET_VERSION (コンテンツハッシュ)。
     from favgallery.server import ASSET_VERSION

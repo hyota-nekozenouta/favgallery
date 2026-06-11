@@ -27,10 +27,14 @@ export function openCookieModal() {
   // 保存/テストボタンに必ず届く (2026-06-10 スマホでボタン押せない bug。
   // items-center だけだと flexbox 中央寄せがはみ出し分を両端クリップする)
   modal.className = 'fixed inset-0 bg-black/80 flex z-[70] p-4 overflow-y-auto';
+  // 版表示は window.APP_VERSION (index.html inline で配信時置換) を使う。
+  // APP_VERSION プレースホルダ (アンダースコア囲み) はサーバーが index.html しか
+  // 置換しないため、静的配信の lib/*.js に書くと生表示される
+  // (Phase 4A からの生表示バグ修正 2026-06-11。regression テストが literal を検出する)
   modal.innerHTML = `
     <div class="bg-zinc-900 border border-zinc-800 rounded-lg w-full max-w-lg p-4 space-y-3 m-auto">
       <div class="flex items-center justify-between">
-        <div class="text-sm text-zinc-200 font-medium">X cookies の設定 <span class="text-zinc-600 text-xs">v__APP_VERSION__</span></div>
+        <div class="text-sm text-zinc-200 font-medium">X cookies の設定 <span class="text-zinc-600 text-xs">v${window.APP_VERSION}</span></div>
         <button id="cookieCloseBtn" class="text-zinc-400 hover:text-white text-xl leading-none">×</button>
       </div>
       <div id="cookieCurStatus" class="text-xs text-zinc-400">状態を確認中…</div>
