@@ -26,6 +26,23 @@ if TYPE_CHECKING:
 _MY_USERNAME_KEY = "my_username"
 
 
+def is_sensitive_name(name: str) -> bool:
+    """True if a filename must never be served by the rel_path media routes.
+
+    cookies.txt (full X account-takeover credential), the SQLite databases and
+    their -wal/-shm sidecars, dotfiles (incl. the .cookies.*.tmp atomic-write
+    temp) all live INSIDE library_root by design — the volume mount is the only
+    persistent disk — so path-traversal checks alone cannot keep them private.
+    """
+    lowered = name.lower()
+    if lowered == "cookies.txt" or lowered.startswith("."):
+        return True
+    return any(
+        part in ("sqlite", "sqlite3", "db", "tmp") or part.startswith("sqlite-")
+        for part in lowered.split(".")[1:]
+    )
+
+
 @dataclass
 class AppContext:
     """Single source of the shared state + collaborators for all routers."""
@@ -107,12 +124,18 @@ class AppContext:
         return (self.db.get_setting(_MY_USERNAME_KEY) or "").strip()
 
     def validate_rel_path(self, rel_path: str) -> None:
-        """Raise HTTPException(400) if rel_path tries to escape the library root."""
+        """Raise HTTPException(400) if rel_path tries to escape the library root.
+
+        Sensitive files (cookies.txt / DBs / dotfiles) return 404 — not 403 —
+        so their existence is not advertised to the client.
+        """
         target = (self.library_root / rel_path).resolve()
         try:
             target.relative_to(self.library_root_resolved)
         except ValueError as e:
             raise HTTPException(status_code=400, detail="path escape") from e
+        if is_sensitive_name(target.name):
+            raise HTTPException(status_code=404, detail="not found")
 
     def resolve_under_library(self, rel_path: str) -> Path:
         """Resolve rel_path under the library, guarding against escapes + 404s."""
@@ -121,6 +144,8 @@ class AppContext:
             target.relative_to(self.library_root_resolved)
         except ValueError as e:
             raise HTTPException(status_code=400, detail="path escape") from e
+        if is_sensitive_name(target.name):
+            raise HTTPException(status_code=404, detail="not found")
         if not target.is_file():
             raise HTTPException(status_code=404, detail="not found")
         return target
