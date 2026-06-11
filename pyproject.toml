@@ -1,6 +1,6 @@
 [project]
 name = "favgallery"
-version = "0.4.5"
+version = "0.4.6"
 description = "Browse and sync your X (Twitter) liked-media archive."
 readme = "README.md"
 requires-python = ">=3.12"
