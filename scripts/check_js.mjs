@@ -31,9 +31,19 @@ function check(file, asModule = false) {
   }
 }
 
-// 1) index.html の inline script
+// 1) index.html の inline script (src= なし かつ JS 種別のものだけ)
+//    type="importmap" 等の JSON ブロックは JS ではないので除外する
 const html = readFileSync(join(staticDir, "index.html"), "utf-8");
-const scripts = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+const JS_TYPES = new Set(["", "module", "text/javascript", "application/javascript"]);
+const scripts = [];
+for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)) {
+  const attrs = m[1];
+  if (/\bsrc\s*=/.test(attrs)) continue; // 外部スクリプト
+  const typeMatch = attrs.match(/\btype\s*=\s*["']([^"']*)["']/i);
+  const type = typeMatch ? typeMatch[1].toLowerCase() : "";
+  if (!JS_TYPES.has(type)) continue; // importmap / application/json 等
+  scripts.push(m[2]);
+}
 if (scripts.length) {
   const tmp = join(root, ".tmp_check_inline.js");
   writeFileSync(tmp, scripts.join("\n;\n"), "utf-8");

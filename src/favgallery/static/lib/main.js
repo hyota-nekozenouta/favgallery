@@ -1,26 +1,5 @@
-const state = {
-  tab: 'likes',                      // 'likes' | 'timeline'
-  layout: 'masonry',                 // 'masonry' | 'reel'
-  authors: [],
-  tags: [],
-  lists: [],                          // [{id, name, count}]
-  filter: { author: null, tag: null, media_type: '', q: '', list_id: null },
-  hideLiked: true,
-  posts: [],
-  total: 0,
-  offset: 0,
-  limit: 60,
-  loading: false,
-  syncRunning: false,
-  lastSeenTimeline: '',               // tweet_id; '' = no marker yet
-  dividerInserted: false,             // current page's divider rendered?
-  lb: { items: [], pos: 0 },          // lightbox group: posts sharing tweet_id
-  authorSummary: null,                // cached { author, nick, counts } for the current filter
-  unliked: { active: false, author: null, items: [], offset: 0, limit: 60, hasMore: false, loading: false, loadingMore: false, error: '' },
-  favoriteAuthors: new Set(),
-};
-
-const $ = (sel) => document.querySelector(sel);
+import { state } from 'state';
+import { $, $$, escapeHtml } from 'dom';
 
 // --- Video thumbnail capture (Canvas API) -------------------------
 const videoCapObserver = new IntersectionObserver((entries) => {
@@ -84,10 +63,7 @@ function updateLoadingState() {
     el.classList.add('hidden');
   }
 }
-const $$ = (sel) => Array.from(document.querySelectorAll(sel));
-const escapeHtml = (s) => (s ?? '').toString()
-  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-  .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+// $ / $$ / escapeHtml は dom.js から import (Phase 4B)
 
 // --- Tabs ----------------------------------------------------------
 function switchTab(tab) {

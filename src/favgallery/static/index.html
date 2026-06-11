@@ -196,6 +196,18 @@ window.addEventListener('unhandledrejection', (e) =>
   reportClientError('unhandledrejection',
     (e.reason && (e.reason.stack || e.reason.message)) || e.reason));
 </script>
+<!-- import map: 全モジュールを ?v=__ASSET_VERSION__ 付き URL へ解決 (Phase 4B)。
+     Cloudflare が /static/*.js を 4h 強制キャッシュするため、深い相対 import では
+     ?v= を運べない → ここで bare specifier をバージョン付き URL にマップする。
+     __ASSET_VERSION__ は server root() が配信時に資産ハッシュへ置換 (index.html 内のみ置換が効く)。 -->
+<script type="importmap">
+{
+  "imports": {
+    "state": "/static/lib/state.js?v=__ASSET_VERSION__",
+    "dom": "/static/lib/dom.js?v=__ASSET_VERSION__"
+  }
+}
+</script>
 <script type="module" src="/static/lib/main.js?v=__ASSET_VERSION__"></script>
 </body>
 </html>
