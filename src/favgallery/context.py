@@ -52,7 +52,6 @@ class AppContext:
     library_root_resolved: Path
     cookies_file: Path
     gallerydl_config_path: Path
-    fav_authors_path: Path
     static_dir: Path
     books_dir: str
 

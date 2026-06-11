@@ -266,7 +266,6 @@ def create_app(
         if portable_root() is not None
         else library_root.parent / "config" / "gallery-dl.json"
     )
-    _fav_authors_path = library_root.parent.parent / "config" / "favorite_authors.json"
     _ensure_gallerydl_config(gallerydl_config_path, library_root)
     # Serialize gallery-dl invocations: prepare_config touches global state.
     # Shared by SyncRunner, TimelineRefresher, and the unliked author fetch so
@@ -381,7 +380,6 @@ def create_app(
         library_root_resolved=library_root_resolved,
         cookies_file=cookies_file,
         gallerydl_config_path=gallerydl_config_path,
-        fav_authors_path=_fav_authors_path,
         static_dir=static_dir,
         books_dir=books_dir,
         db=db,
