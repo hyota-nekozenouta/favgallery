@@ -425,3 +425,16 @@ git merge --no-ff feat/rename-favgallery -m "merge: Archive -> FavGallery rename
 ```
 
 push（= Railway 自動デプロイ発火の可能性）は、env fallback により安全だが、本番に出る変更なので報告とセットで実施判断。
+
+---
+
+## 2026-06-11 追補: スコープ外として残していた統一の消化
+
+ひょーたさん GO（「全部やっていいよ」）により、開発HALO #2 が以下を実施:
+
+- [x] GitHub リポ rename: `hyota-nekozenouta/archive` → `hyota-nekozenouta/favgallery`（gh repo rename・旧 URL は GitHub が自動リダイレクト）
+- [x] HALO submodule パス rename: `projects/archive` → `projects/favgallery`（.gitmodules path/url 更新 + module config の worktree/origin 配線修正。`.git/modules/projects/archive` の内部名は git の流儀に従い据え置き）
+- [x] HALO `.gitignore` のパス追従
+- [x] README / DEPLOY.md の旧パス・旧 URL 記述を実態へ更新（Root Directory はリポルートが正・「HALO/projects/archive を Root Directory に」は旧構成の残骸だった）
+- [ ] Cloudflare `archive` CNAME 削除（API token 不在のためひょーたさんへ依頼）
+- [ ] HALO 側ドキュメント（products spec / INDEX）の FavGallery 化（メインHALO / products 部へ申し送り）

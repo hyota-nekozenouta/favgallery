@@ -12,7 +12,7 @@ X(Twitter) のいいねした画像・動画を保存・閲覧する個人向け
 ## 開発
 
 ```bash
-cd projects/archive
+cd projects/favgallery
 uv sync
 uv run pytest          # テスト
 PYTHONPATH=src uv run uvicorn favgallery.server:app --reload  # ローカル起動
@@ -30,4 +30,5 @@ npx --yes tailwindcss@3.4.17 -c tailwind.config.js -i scripts/tailwind.input.css
 ## デプロイ
 
 Railway + Cloudflare での公開手順は [DEPLOY.md](DEPLOY.md) を参照。
-公開 URL: https://favgallery.hyota.cloud （旧 https://archive.hyota.cloud も当面有効）
+公開 URL: https://favgallery.hyota.cloud
+（旧 https://archive.hyota.cloud は廃止 — 証明書なしでアクセス不可・DNS レコードも削除。2026-06-11 名称統一）
