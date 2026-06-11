@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 import os
 import secrets
@@ -104,6 +105,44 @@ def _resolve_app_version() -> str:
 APP_VERSION = _resolve_app_version()
 
 
+def _resolve_asset_version(static_dir: Path) -> str:
+    """キャッシュバスト用トークン — 配信 static 資産のコンテンツハッシュ。
+
+    `?v=` クエリに使う。Cloudflare が /static/*.js に 4h キャッシュを強制する
+    ため、JS/CSS を変えたら URL のキャッシュキーを変える必要がある。
+
+    なぜ app version と分離するか (2026-06-11 ひょーたさん「バージョンバンプは
+    ミス」): app version をキャッシュバストの度に上げると、純粋なリファクタでも
+    版が上がり SemVer の意味が壊れる。資産トークンは「内容が変わった時だけ」変わる
+    べきで、それはコンテンツハッシュが正確に満たす。app version は表示専用に戻す。
+
+    対象は ?v= 付きで参照される style.css + lib/*.js のみ (index.html 自体は
+    no-cache 配信なのでトークン不要)。ファイル名もハッシュに含めるので、モジュール
+    追加・リネームでもトークンが変わる。内容が同じデプロイでは不変 = 不要な再取得なし。
+    """
+    h = hashlib.sha256()
+    paths: list[Path] = []
+    css = static_dir / "style.css"
+    if css.exists():
+        paths.append(css)
+    lib_dir = static_dir / "lib"
+    if lib_dir.exists():
+        paths.extend(sorted(lib_dir.glob("*.js")))
+    for p in paths:
+        h.update(p.name.encode("utf-8"))
+        h.update(b"\0")
+        h.update(p.read_bytes())
+        h.update(b"\0")
+    return h.hexdigest()[:12]
+
+
+#: ?v= cache key on versioned asset URLs. Content hash of style.css + lib/*.js,
+#: decoupled from APP_VERSION so a pure refactor busts cache WITHOUT a version
+#: bump (2026-06-11 ひょーたさん「バージョンバンプはミス」). Changes IFF assets change.
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
+ASSET_VERSION = _resolve_asset_version(_STATIC_DIR)
+
+
 def _env_first(*names: str) -> str:
     """Return the first non-empty value among the given env var names.
 
@@ -171,7 +210,7 @@ def _register_http_shell_middleware(app: FastAPI) -> None:
 
     Outermost middleware (last added runs first): version-stamp every response,
     including the auth middleware's 401s. /static のキャッシュ方針:
-    - style.css は ?v=__APP_VERSION__ 付き参照のため immutable 長期キャッシュ可
+    - style.css は ?v=__ASSET_VERSION__ 付き参照のため immutable 長期キャッシュ可
     - それ以外 (lib/*.js 含む) は no-cache — ES module の深い import は ?v= を
       運べず、スマホ古キャッシュ事故 (v0.2.3) を構造的に再発させないため
     """
@@ -200,6 +239,8 @@ def _register_shell_routes(app: FastAPI, static_dir: Path) -> None:
         html = (static_dir / "index.html").read_text(encoding="utf-8")
         # 端末側に表示中バージョンを出す (スマホ古キャッシュ診断 / 2026-06-10)
         html = html.replace("__APP_VERSION__", APP_VERSION)
+        # 資産 URL の ?v= キャッシュキー。app version とは別トークン (2026-06-11)
+        html = html.replace("__ASSET_VERSION__", ASSET_VERSION)
         # no-cache: SPA シェルを端末キャッシュさせない。デプロイ後にスマホが
         # 古い JS を使い回し「直したのに変わらない」が起きた (2026-06-10)。
         return HTMLResponse(html, headers={"Cache-Control": "no-cache"})

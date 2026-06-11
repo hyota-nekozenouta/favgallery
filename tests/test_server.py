@@ -151,12 +151,28 @@ def test_index_html_served(client: TestClient) -> None:
 @pytest.mark.integration
 def test_index_injects_app_version(client: TestClient) -> None:
     """__APP_VERSION__ プレースホルダは配信時に実バージョンへ置換される
-    (端末側にどの版が出ているか表示する遠隔診断 / 2026-06-10)。"""
+    (端末側にどの版が出ているか表示する遠隔診断 / 2026-06-10)。
+    __ASSET_VERSION__ も同時に置換され、生プレースホルダが残らないこと。"""
     from favgallery.server import APP_VERSION
 
     r = client.get("/")
     assert "__APP_VERSION__" not in r.text
+    assert "__ASSET_VERSION__" not in r.text
     assert f"v{APP_VERSION}" in r.text
+
+
+@pytest.mark.integration
+def test_asset_version_decoupled_from_app_version() -> None:
+    """キャッシュバスト用 ASSET_VERSION は app version と独立したコンテンツハッシュ。
+    純粋リファクタで版を上げずにキャッシュを更新するための分離 (2026-06-11
+    ひょーたさん「バージョンバンプはミス」)。"""
+    from favgallery.server import APP_VERSION, ASSET_VERSION
+
+    # 12 桁の 16 進トークン
+    assert len(ASSET_VERSION) == 12
+    assert all(c in "0123456789abcdef" for c in ASSET_VERSION)
+    # 版表示 (例 "0.4.3" / "dev") とは別物 = 分離できている
+    assert ASSET_VERSION != APP_VERSION
 
 
 @pytest.mark.integration
@@ -747,10 +763,12 @@ def test_prebuilt_css_served_with_long_cache(client: TestClient) -> None:
 
 @pytest.mark.integration
 def test_index_references_versioned_stylesheet(client: TestClient) -> None:
-    from favgallery.server import APP_VERSION
+    # 資産 URL の ?v= は app version ではなくコンテンツハッシュ (ASSET_VERSION)。
+    # 純粋リファクタで版を上げずにキャッシュバストするため (2026-06-11 分離)。
+    from favgallery.server import ASSET_VERSION
 
     html = client.get("/").text
-    assert f"/static/style.css?v={APP_VERSION}" in html
+    assert f"/static/style.css?v={ASSET_VERSION}" in html
     assert "cdn.tailwindcss.com" not in html
 
 
@@ -779,10 +797,11 @@ def test_main_js_module_served_no_cache(client: TestClient) -> None:
 
 @pytest.mark.integration
 def test_index_references_versioned_module_entry(client: TestClient) -> None:
-    from favgallery.server import APP_VERSION
+    # モジュール URL の ?v= も ASSET_VERSION (コンテンツハッシュ)。
+    from favgallery.server import ASSET_VERSION
 
     html = client.get("/").text
-    assert f'<script type="module" src="/static/lib/main.js?v={APP_VERSION}"></script>' in html
+    assert f'<script type="module" src="/static/lib/main.js?v={ASSET_VERSION}"></script>' in html
     # bootstrap (エラーレポータ + APP_VERSION) は inline に残っていること
     assert "window.APP_VERSION" in html
     assert "reportClientError" in html
