@@ -13,3 +13,6 @@ wheels/
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Brainstorming visual companion scratch
+.superpowers/
