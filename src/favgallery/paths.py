@@ -24,12 +24,7 @@ def default_library_root() -> Path:
     p = portable_root()
     if p is not None:
         return p / "data" / "library"
-    return Path(r"C:\Users\hyota\Pictures\X-Likes")
-
-
-def default_xlikes_exe() -> Path:
-    """Where to find the bundled `xlikes.exe` for sync."""
-    p = portable_root()
-    if p is not None:
-        return p / "xlikes.exe"
-    return Path(r"C:\Users\hyota\.local\bin\xlikes.exe")
+    # 非ポータブル/サーバー実行時の既定。環境変数 FAVGALLERY_LIBRARY_ROOT が
+    # 設定されていればそちらが優先される (server.py / cli.py)。ここはゼロ設定時の
+    # フォールバックで、クローンしたリポジトリ直下の ./data/library を使う。
+    return Path.cwd() / "data" / "library"
