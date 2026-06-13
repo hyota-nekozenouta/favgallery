@@ -24,8 +24,10 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH=/app/src \
     FAVGALLERY_LIBRARY_ROOT=/data/library
 
-# Library media + SQLite DB + cookies persist here. Mount a host dir or volume.
-VOLUME ["/data"]
+# Library media + SQLite DB + cookies persist under /data — bind-mount a host
+# dir or volume there (docker compose maps ./data:/data). No `VOLUME` instruction:
+# bind mounts work without it, and some PaaS builders (e.g. Railway) reject VOLUME.
 EXPOSE 8000
 
-CMD ["uvicorn", "favgallery.server:app", "--host", "0.0.0.0", "--port", "8000"]
+# Honor $PORT when the platform injects one (Railway / Render / …); default 8000 locally.
+CMD ["sh", "-c", "uvicorn favgallery.server:app --host 0.0.0.0 --port ${PORT:-8000}"]
