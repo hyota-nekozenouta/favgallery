@@ -60,6 +60,10 @@ body {
 .icon-btn:focus-visible { background: #1d1f23; color: var(--ink); }
 .icon-btn .icon { width: 19px; height: 19px; }
 @media (pointer: coarse) { .icon-btn { width: 44px; height: 44px; } }
+/* タッチ環境では小さな単体アイコンボタン(リスト削除など)のヒット領域も広げる */
+@media (pointer: coarse) {
+  .list-del { min-width: 40px; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; }
+}
 
 /* ---- Masonry ---- */
 .masonry { column-gap: 10px; column-count: 2; }
