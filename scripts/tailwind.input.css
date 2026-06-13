@@ -210,6 +210,7 @@ body {
 
 /* ---- タブ ---- */
 .tab-btn {
+  display: inline-flex; align-items: center; gap: 6px;
   padding: 6px 14px; border-radius: 8px; font-size: 14px; cursor: pointer;
   transition: background .15s, color .15s;
 }
@@ -220,11 +221,12 @@ body {
   color: #fff;
   box-shadow: 0 1px 6px rgba(29,155,240,.3);
 }
-.tab-icon { display: none; }
+/* アイコンは PC でも常時表示 (アイコン+ラベル / 承認モック準拠)。スマホはラベルを隠してアイコンのみ。 */
+.tab-icon { display: inline-flex; align-items: center; }
+.tab-icon .icon { width: 16px; height: 16px; }
 @media (max-width: 767px) {
-  .tab-btn { padding: 6px 10px; font-size: 16px; }
+  .tab-btn { padding: 8px 12px; font-size: 16px; }
   .tab-label { display: none; }
-  .tab-icon { display: inline; }
 }
 
 /* ---- ポップオーバー ---- */
