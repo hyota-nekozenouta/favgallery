@@ -4,6 +4,16 @@ version = "0.5.0"
 description = "Browse and sync your X (Twitter) liked-media archive."
 readme = "README.md"
 requires-python = ">=3.12"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+authors = [{ name = "hyota" }]
+classifiers = [
+    "Programming Language :: Python :: 3.12",
+    "Framework :: FastAPI",
+    "Topic :: Multimedia :: Graphics :: Viewers",
+    "Operating System :: OS Independent",
+    "Environment :: Web Environment",
+]
 dependencies = [
     "beautifulsoup4>=4.12",
     "boto3>=1.38.0",
@@ -25,6 +35,10 @@ cloud = ["boto3>=1.38.0"]
 
 [project.scripts]
 favgallery = "favgallery.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/hyota-nekozenouta/favgallery"
+Repository = "https://github.com/hyota-nekozenouta/favgallery"
 
 [build-system]
 requires = ["uv_build>=0.11.9,<0.12.0"]
