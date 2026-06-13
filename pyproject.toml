@@ -77,6 +77,9 @@ exclude_lines = [
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# Ad-hoc ローカル dev ヘルパー（preview / ベンチ）。出荷パッケージにもテストにも
+# 含まれず、日本語の全角約物を意図的に使うため lint 対象外とする。
+extend-exclude = ["scripts/demo_preview.py", "scripts/perf_baseline.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF"]
