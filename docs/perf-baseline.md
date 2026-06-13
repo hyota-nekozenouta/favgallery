@@ -35,6 +35,7 @@
 ## 構造的コスト（リファクタ前・コード検証で確定）
 
 - ページロードごとに自動同期（gallery-dl フルスクレイプ）+ 重複チェック 2 種（SHA-256 全走査 + imagehash）= 変化ゼロでも 20〜90 秒の background CPU
+  - セルフホストで重い場合は環境変数 `FAVGALLERY_AUTOSYNC_ON_LOAD=0` でページロード時の自動同期を無効化できる（手動同期ボタンは引き続き使用可）。
 - Tailwind CDN 実行時 JIT: ~100-150KB DL + 解析を毎ロード
 - /api/posts は毎回 `all_listed_post_keys()` で DB 全読み / /api/books は books × book_tags の N+1
 - メディア・サムネは weak ETag（毎回 revalidation）

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from time import time
 
 from fastapi import APIRouter, Depends, Query
@@ -21,6 +22,17 @@ AUTO_SYNC_COOLDOWN_SECONDS = 600.0
 # the old GALLERY_DL_COOKIES env-var provisioning. The word "cookies" must stay —
 # the frontend shows it as-is and a test asserts the reason mentions cookies.
 _MSG_NO_COOKIES = "cookies が未設定です。⚙ 設定 → 🔑 から登録してください。"
+
+_AUTOSYNC_OFF = {"0", "false", "no", "off"}
+
+
+def _autosync_on_load_enabled() -> bool:
+    """ページロード時の自動同期の有効/無効。
+
+    セルフホスト配慮 (FAVGALLERY_AUTOSYNC_ON_LOAD=0 で無効化)。既定は有効。
+    手動同期 (auto=False) はこのフラグの影響を受けず常に実行できる。
+    """
+    return os.environ.get("FAVGALLERY_AUTOSYNC_ON_LOAD", "1").strip().lower() not in _AUTOSYNC_OFF
 
 
 @router.get("/api/sync/status")
@@ -46,6 +58,9 @@ def sync_start(
     auto: bool = Query(default=False),
     ctx: AppContext = Depends(get_context),
 ) -> JSONResponse:
+    if auto and not _autosync_on_load_enabled():
+        # セルフホスト側で自動同期を切っている。フロントは started:false を無音 skip する。
+        return JSONResponse({"started": False, "reason": "autosync disabled"})
     if not ctx.cookies_file.exists():
         return JSONResponse(
             {"started": False, "reason": _MSG_NO_COOKIES},
