@@ -40,9 +40,9 @@
           <div class="wordmark">FavGallery</div>
           <span class="text-xs text-zinc-500 font-display" id="postCount"></span>
           <div class="flex-1"></div>
-          <span id="loadingIndicator" class="hidden text-base leading-none select-none">⏳</span>
-          <button id="manualSyncBtn" class="text-zinc-500 hover:text-zinc-200 text-base p-1 rounded hover:bg-zinc-800" title="今すぐ同期">⟳</button>
-          <button id="optionsBtn" class="text-zinc-500 hover:text-zinc-200 text-base p-1 rounded hover:bg-zinc-800" title="設定">⚙</button>
+          <span id="loadingIndicator" class="hidden"><svg class="icon icon-spin" aria-hidden="true"><use href="#ic-loader"/></svg></span>
+          <button id="manualSyncBtn" class="icon-btn" title="今すぐ同期" aria-label="今すぐ同期"><svg class="icon" aria-hidden="true"><use href="#ic-refresh"/></svg></button>
+          <button id="optionsBtn" class="icon-btn" title="設定" aria-label="設定"><svg class="icon" aria-hidden="true"><use href="#ic-settings"/></svg></button>
         </div>
         <div id="sidebarPostsHeader">
           <input id="searchBox" type="search" placeholder="検索 (作者・本文・タグ)"
@@ -61,7 +61,7 @@
         <!-- Lists -->
         <div class="px-4 py-3 border-b border-zinc-800">
           <div class="flex items-center justify-between mb-2">
-            <div class="text-xs uppercase tracking-wider text-zinc-500">📋 リスト</div>
+            <div class="text-xs uppercase tracking-wider text-zinc-500 flex items-center gap-1"><svg class="icon" aria-hidden="true"><use href="#ic-list"/></svg> リスト</div>
             <button id="newListBtn" class="text-xs text-indigo-400 hover:text-indigo-300">+ 新規</button>
           </div>
           <div id="listSidebar" class="space-y-1"></div>
@@ -75,7 +75,7 @@
           <div id="authorList" class="space-y-1"></div>
           <div id="authorSingleSection" class="hidden mt-1">
             <button id="authorSingleToggle" class="w-full flex items-center justify-between text-xs text-zinc-600 hover:text-zinc-400 py-1">
-              1件のみ <span id="authorSingleIcon">▶</span>
+              1件のみ <span id="authorSingleIcon"><svg class="icon icon-chevron" aria-hidden="true"><use href="#ic-chevron-right"/></svg></span>
             </button>
             <div id="authorSingleList" class="space-y-1 hidden"></div>
           </div>
@@ -83,7 +83,7 @@
         <!-- Tags -->
         <div class="px-4 py-3 border-t border-zinc-800">
           <button id="tagToggle" class="w-full flex items-center justify-between text-xs uppercase tracking-wider text-zinc-500 hover:text-zinc-300">
-            タグ <span id="tagToggleIcon">▶</span>
+            タグ <span id="tagToggleIcon"><svg class="icon icon-chevron" aria-hidden="true"><use href="#ic-chevron-right"/></svg></span>
           </button>
           <div id="tagList" class="flex flex-wrap gap-1 mt-2 hidden"></div>
         </div>
@@ -97,13 +97,13 @@
         <!-- Favorites filter -->
         <div class="px-4 py-3 border-b border-zinc-800">
           <button id="bookFavFilter" class="w-full flex items-center gap-2 text-sm text-zinc-300 hover:text-white py-1 px-2 rounded hover:bg-zinc-800 transition-colors">
-            <span>⭐</span> <span>お気に入り</span> <span id="bookFavCount" class="ml-auto text-xs text-zinc-500">0</span>
+            <svg class="icon" aria-hidden="true"><use href="#ic-star"/></svg> <span>お気に入り</span> <span id="bookFavCount" class="ml-auto text-xs text-zinc-500">0</span>
           </button>
         </div>
         <!-- Book Tags -->
         <div class="px-4 py-3">
           <div class="flex items-center justify-between mb-2">
-            <div class="text-xs uppercase tracking-wider text-zinc-500">🏷 タグ</div>
+            <div class="text-xs uppercase tracking-wider text-zinc-500 flex items-center gap-1"><svg class="icon" aria-hidden="true"><use href="#ic-tag"/></svg> タグ</div>
           </div>
           <div id="bookTagList" class="space-y-1"></div>
         </div>
@@ -115,18 +115,18 @@
       <div class="px-6 py-3 border-b border-zinc-800 flex items-center gap-3">
         <button id="hamburger-btn"
           class="items-center justify-center w-8 h-8 text-zinc-400 hover:text-white hover:bg-zinc-700 rounded transition-colors text-xl leading-none"
-          title="メニュー">☰</button>
+          title="メニュー" aria-label="メニュー"><svg class="icon" aria-hidden="true"><use href="#ic-menu"/></svg></button>
         <div class="flex items-center gap-1 bg-zinc-900 rounded-md p-1">
-          <button id="tabLikes" class="tab-btn active"><span class="tab-icon">♥</span><span class="tab-label">いいね</span></button>
-          <button id="tabTimeline" class="tab-btn"><span class="tab-icon">👁</span><span class="tab-label">フォロー中</span></button>
-          <button id="tabBookshelf" class="tab-btn"><span class="tab-icon">📚</span><span class="tab-label">本棚</span></button>
+          <button id="tabLikes" class="tab-btn active"><span class="tab-icon"><svg class="icon" aria-hidden="true"><use href="#ic-heart"/></svg></span><span class="tab-label">いいね</span></button>
+          <button id="tabTimeline" class="tab-btn"><span class="tab-icon"><svg class="icon" aria-hidden="true"><use href="#ic-eye"/></svg></span><span class="tab-label">フォロー中</span></button>
+          <button id="tabBookshelf" class="tab-btn"><span class="tab-icon"><svg class="icon" aria-hidden="true"><use href="#ic-book"/></svg></span><span class="tab-label">本棚</span></button>
         </div>
-        <button id="layoutToggle" title="レイアウト切替"
-          class="p-1.5 rounded text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors text-lg leading-none">▦</button>
+        <button id="layoutToggle" title="レイアウト切替" aria-label="レイアウト切替"
+          class="icon-btn"><svg class="icon" aria-hidden="true"><use href="#ic-grid"/></svg></button>
         <div id="filterChips" class="flex flex-wrap gap-2"></div>
         <div class="flex-1"></div>
-        <button id="markSeenBtn" class="hidden bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs rounded-md px-3 py-1.5" title="現在いちばん上のツイートまで「ここまで見た」マークを移動">📍 ここまで既読</button>
-<button id="timelineRefreshBtn" class="hidden bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded-md px-3 py-1.5">⟳ 取得</button>
+        <button id="markSeenBtn" class="hidden items-center gap-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs rounded-md px-3 py-1.5" title="現在いちばん上のツイートまで「ここまで見た」マークを移動"><svg class="icon" aria-hidden="true"><use href="#ic-check"/></svg> ここまで既読</button>
+<button id="timelineRefreshBtn" class="hidden items-center gap-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded-md px-3 py-1.5"><svg id="timelineRefreshIcon" class="icon" aria-hidden="true"><use href="#ic-download"/></svg> <span id="timelineRefreshLabel">取得</span></button>
         <div class="text-sm text-zinc-500 font-display" id="resultCount"></div>
       </div>
       <div id="authorHeader" class="hidden px-6 py-2 border-b border-zinc-800 flex items-center gap-3 bg-zinc-950/60">
@@ -146,9 +146,9 @@
 
   <!-- Lightbox -->
   <div id="lightbox" class="modal fixed inset-0 bg-black/85 hidden items-center justify-center z-50">
-    <div class="absolute top-4 right-6 text-zinc-400 hover:text-white text-3xl cursor-pointer select-none" id="lbClose">×</div>
-    <div id="lbPrev" class="lb-nav-btn lb-prev hidden" title="前の画像 (←)">◀</div>
-    <div id="lbNext" class="lb-nav-btn lb-next hidden" title="次の画像 (→)">▶</div>
+    <div class="absolute top-4 right-6 text-zinc-400 hover:text-white cursor-pointer select-none" id="lbClose" role="button" aria-label="閉じる"><svg class="icon" aria-hidden="true" style="width:28px;height:28px"><use href="#ic-x"/></svg></div>
+    <div id="lbPrev" class="lb-nav-btn lb-prev hidden" title="前の画像 (←)" role="button" aria-label="前の画像"><svg class="icon" aria-hidden="true" style="width:24px;height:24px"><use href="#ic-chevron-left"/></svg></div>
+    <div id="lbNext" class="lb-nav-btn lb-next hidden" title="次の画像 (→)" role="button" aria-label="次の画像"><svg class="icon" aria-hidden="true" style="width:24px;height:24px"><use href="#ic-chevron-right"/></svg></div>
     <div class="max-w-[92vw] max-h-[92vh] w-full flex flex-col items-center gap-3">
       <div id="lbMedia" class="max-h-[80vh] flex items-center justify-center"></div>
       <div class="bg-zinc-900/80 rounded-lg p-4 max-w-3xl w-full text-sm" id="lbMeta"></div>
@@ -157,7 +157,7 @@
 
   <!-- Book Reader Modal -->
   <div id="readerModal" class="fixed inset-0 bg-black hidden items-center justify-center z-[60] select-none overflow-hidden">
-    <div id="readerCloseBtn" class="absolute top-4 right-6 text-zinc-400 hover:text-white text-3xl cursor-pointer z-20">×</div>
+    <div id="readerCloseBtn" class="absolute top-4 right-6 text-zinc-400 hover:text-white cursor-pointer z-20" role="button" aria-label="閉じる"><svg class="icon" aria-hidden="true" style="width:28px;height:28px"><use href="#ic-x"/></svg></div>
     <div class="absolute top-4 left-1/2 -translate-x-1/2 text-zinc-400 text-sm z-20" id="readerPageNum">1 / 1</div>
     <!-- 3-pane slide track. RTL (manga) layout left->right = [next, current, prev]. -->
     <div id="readerViewport" class="absolute inset-0 overflow-hidden touch-none">
@@ -182,13 +182,13 @@
                class="flex-1 bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs focus:outline-none focus:border-indigo-500" />
         <button id="meSaveBtn" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded px-2 py-1 text-xs">保存</button>
       </div>
-      <button id="meSyncBtn" class="w-full bg-rose-700 hover:bg-rose-600 text-white rounded px-2 py-1 text-xs">♥ マイいいね同期</button>
+      <button id="meSyncBtn" class="w-full inline-flex items-center justify-center gap-1 bg-rose-700 hover:bg-rose-600 text-white rounded px-2 py-1 text-xs"><svg class="icon" aria-hidden="true"><use href="#ic-heart"/></svg> マイいいね同期</button>
       <div id="meStatus" class="text-zinc-500 text-xs"></div>
     </div>
     <div class="px-1 pt-2 pb-1 mt-2 text-xs text-zinc-500 uppercase tracking-wider border-t border-zinc-800">X cookies</div>
     <div class="space-y-1">
       <div id="cookieStatus" class="text-zinc-500 text-xs">確認中…</div>
-      <button id="cookieSetBtn" class="w-full bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded px-2 py-1 text-xs">🔑 cookies を設定 / 更新</button>
+      <button id="cookieSetBtn" class="w-full inline-flex items-center justify-center gap-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded px-2 py-1 text-xs"><svg class="icon" aria-hidden="true"><use href="#ic-key"/></svg> cookies を設定 / 更新</button>
     </div>
     <div class="px-1 pt-2 mt-2 text-[10px] text-zinc-600 border-t border-zinc-800">FavGallery v__APP_VERSION__</div>
   </div>
