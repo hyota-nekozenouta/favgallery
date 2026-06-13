@@ -8,6 +8,7 @@ import { renderAuthorHeader } from 'library';
 import { openLightbox, renderLightbox } from 'lightbox';
 import { openListPopover } from 'popovers';
 import { observeNewTiles } from 'timeline';
+import { icon } from 'icons';
 
 // --- 連続マソンリー: JS 列コンテナ -----------------------------------
 // CSS columns は新タイル追加のたび全タイルを各列へ流し直す（再分配）ため、無限
@@ -71,7 +72,7 @@ function _teardownColumns() {
 // 線の前後で列セットを分ける（線以降は高さ 0 の新しい列へ積む）。
 function _insertDividerBarrier() {
   $('#masonry').insertAdjacentHTML('beforeend',
-    `<div class="seen-divider seen-divider-barrier">📍 ここまで見た</div>`);
+    `<div class="seen-divider seen-divider-barrier">${icon('check')} ここまで見た</div>`);
   _cols = _makeCols(_colCount);
 }
 
@@ -153,7 +154,7 @@ export async function enterUnlikedMode(author) {
   };
   // Replace grid contents with a loading placeholder.
   _teardownColumns();   // 未いいねは 1 列直積み。連続マソンリーの flex 列を解除
-  $('#masonry').innerHTML = `<div class="text-zinc-400 text-sm p-6">⏳ X から @${escapeHtml(author)} の投稿を取得中… (10〜20秒かかることがあります)</div>`;
+  $('#masonry').innerHTML = `<div class="text-zinc-400 text-sm p-6">${icon('loader','icon-spin')} X から @${escapeHtml(author)} の投稿を取得中… (10〜20秒かかることがあります)</div>`;
   $('#resultCount').textContent = '取得中…';
   renderAuthorHeader();
   try {
@@ -274,10 +275,10 @@ function dropUnlikedByTweetId(tweetId) {
 function unlikedTileHtml(p, idx) {
   return `<div class="tile cursor-pointer" data-idx="${idx}">
     <img src="${p.thumb_url}" loading="lazy" decoding="async" alt="" />
-    <div class="like-btn" title="X でいいね + 保存">♥</div>
+    <div class="like-btn" title="X でいいね + 保存">${icon('heart')}</div>
     <div class="info">
       <div class="truncate">${escapeHtml(p.author_nick || p.author_name)} <span class="text-zinc-400">@${escapeHtml(p.author_name)}</span></div>
-      ${p.favorite_count ? `<div class="text-zinc-400 text-[11px]">♥ ${p.favorite_count.toLocaleString()}</div>` : ''}
+      ${p.favorite_count ? `<div class="text-zinc-400 text-[11px] inline-flex items-center gap-1">${icon('heart')} ${p.favorite_count.toLocaleString()}</div>` : ''}
     </div>
   </div>`;
 }
@@ -369,11 +370,11 @@ function emptyStateHtml() {
   if (state.tab === 'timeline') {
     return `<div class="empty-state"><div class="glyph">✦</div>
       <div class="title">タイムラインはまだ空です</div>
-      <div class="hint">右上の「⟳ 取得」でフォロー中の投稿を読み込めます</div></div>`;
+      <div class="hint">右上の「取得」ボタンでフォロー中の投稿を読み込めます</div></div>`;
   }
   return `<div class="empty-state"><div class="glyph">✦</div>
     <div class="title">まだ投稿がありません</div>
-    <div class="hint">ヘッダーの ⟳ ボタンで X のいいねを同期できます</div></div>`;
+    <div class="hint">ヘッダーの「同期」ボタンで X のいいねを同期できます</div></div>`;
 }
 
 function appendTiles(items) {
@@ -570,7 +571,7 @@ function tileHtml(p, idx) {
     ? `<img src="" alt="" data-video-src="${p.media_url}"${dims} style="background:#111;min-height:80px" />`
     : `<img src="${thumbSrc}" loading="lazy" decoding="async" alt=""${dims} />`;
   const sideBtn = state.tab === 'timeline'
-    ? `<div class="like-btn" title="X でいいね + 保存">♥</div>`
+    ? `<div class="like-btn" title="X でいいね + 保存">${icon('heart')}</div>`
     : `<div class="del-btn" title="削除 (再ダウンロード防止)">🗑</div>`;
   const addBtn = `<div class="add-btn" title="リストに追加">+</div>`;
   const starBadge = p.in_any_list ? `<div class="list-star">★</div>` : '';
@@ -581,7 +582,7 @@ function tileHtml(p, idx) {
     ${starBadge}
     <div class="info">
       <div class="truncate">${escapeHtml(p.author_nick || p.author_name)} <span class="text-zinc-400">@${escapeHtml(p.author_name)}</span></div>
-      ${p.favorite_count ? `<div class="text-zinc-400 text-[11px]">♥ ${p.favorite_count.toLocaleString()}</div>` : ''}
+      ${p.favorite_count ? `<div class="text-zinc-400 text-[11px] inline-flex items-center gap-1">${icon('heart')} ${p.favorite_count.toLocaleString()}</div>` : ''}
     </div>
   </div>`;
 }
@@ -594,10 +595,10 @@ function reelItemHtml(p, idx, isSeenBoundary = false) {
        <video data-src="${p.media_url}" preload="none" muted loop playsinline class="reel-media"></video>`
     : `<img src="${p.media_url}" loading="lazy" decoding="async" alt="" />`;
   const sideBtn = state.tab === 'timeline'
-    ? `<div class="like-btn" title="X でいいね + 保存">♥</div>`
+    ? `<div class="like-btn" title="X でいいね + 保存">${icon('heart')}</div>`
     : `<div class="del-btn" title="削除 (再ダウンロード防止)">🗑</div>`;
   const addBtn = `<div class="add-btn" title="リストに追加">+</div>`;
-  const seenBadge = isSeenBoundary ? `<div class="reel-seen-badge">📍 ここまで見た</div>` : '';
+  const seenBadge = isSeenBoundary ? `<div class="reel-seen-badge">${icon('check')} ここまで見た</div>` : '';
   return `<div class="reel-item cursor-pointer" data-idx="${idx}">
     ${seenBadge}
     ${media}
@@ -605,7 +606,7 @@ function reelItemHtml(p, idx, isSeenBoundary = false) {
     ${addBtn}
     <div class="reel-info">
       <div class="truncate">${escapeHtml(p.author_nick || p.author_name)} <span class="opacity-60">@${escapeHtml(p.author_name)}</span></div>
-      ${p.favorite_count ? `<div class="opacity-60 text-[11px]">♥ ${p.favorite_count.toLocaleString()}</div>` : ''}
+      ${p.favorite_count ? `<div class="opacity-60 text-[11px] inline-flex items-center gap-1">${icon('heart')} ${p.favorite_count.toLocaleString()}</div>` : ''}
     </div>
   </div>`;
 }

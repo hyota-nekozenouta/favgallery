@@ -8,24 +8,13 @@ import { fetchPosts } from 'posts';
 
 // --- Loading indicator (hourglass) --------------------------------
 let _syncActive = false, _dedupActive = false, _visualDedupActive = false;
-let _hourglassTimer = null, _hourglassFlip = false;
+// ローディング表示は #loadingIndicator 内の SVG ローダー (.icon-spin) が CSS で回転する。
+// ここでは表示/非表示の切替だけ行う (旧: ⏳/⌛ を textContent でフリップ → SVG を上書きしてしまうため廃止)。
 function updateLoadingState() {
   const active = _syncActive || _dedupActive || _visualDedupActive;
   const el = $('#loadingIndicator');
   if (!el) return;
-  if (active && !_hourglassTimer) {
-    el.classList.remove('hidden');
-    _hourglassTimer = setInterval(() => {
-      _hourglassFlip = !_hourglassFlip;
-      el.textContent = _hourglassFlip ? '⌛' : '⏳';
-    }, 600);
-  } else if (!active && _hourglassTimer) {
-    clearInterval(_hourglassTimer);
-    _hourglassTimer = null;
-    _hourglassFlip = false;
-    el.textContent = '⏳';
-    el.classList.add('hidden');
-  }
+  el.classList.toggle('hidden', !active);
 }
 
 export async function pollSync() {

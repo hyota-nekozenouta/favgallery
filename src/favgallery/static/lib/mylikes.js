@@ -22,7 +22,7 @@ function renderMeStatus(s) {
   } else if (typeof s.my_likes_count === 'number') {
     lines.push(`${s.my_likes_count.toLocaleString()} 件キャッシュ`);
   }
-  if (s.running) lines.push('⏳ 同期中…');
+  if (s.running) lines.push('同期中…');
   else if (s.last_error) lines.push(`✗ ${escapeHtml(s.last_error)}`);
   else if (s.last_added) lines.push(`✓ +${s.last_added} 件追加`);
   $('#meStatus').textContent = lines.join(' / ');

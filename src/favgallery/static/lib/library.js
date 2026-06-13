@@ -4,6 +4,7 @@ import { state } from 'state';
 import { $, $$, escapeHtml } from 'dom';
 import { showNotice } from 'notices';
 import { fetchPosts, enterUnlikedMode, exitUnlikedMode } from 'posts';
+import { icon } from 'icons';
 
 export async function loadLibrary() {
   let data;
@@ -17,7 +18,7 @@ export async function loadLibrary() {
   }
   state.authors = data.authors;
   state.tags = data.tags;
-  const label = data.scanning ? `📚 スキャン中… ${data.post_count.toLocaleString()}` : `${data.post_count.toLocaleString()} posts`;
+  const label = data.scanning ? `スキャン中… ${data.post_count.toLocaleString()}` : `${data.post_count.toLocaleString()} posts`;
   $('#postCount').textContent = label;
   renderAuthors(); renderTags();
   // If the initial library scan is still running, poll until done and then
@@ -94,7 +95,7 @@ export function renderAuthors() {
   if (single.length > 0) {
     singleSection.classList.remove('hidden');
     const btn = $('#authorSingleToggle');
-    btn.querySelector('span').textContent = btn.dataset.open === '1' ? '▼' : '▶';
+    btn.querySelector('.icon-chevron')?.classList.toggle('open', btn.dataset.open === '1');
     singleList.innerHTML = sortGroup(single).map(authorRowHtml).join('');
     bindAuthorEvents(singleList);
   } else {
@@ -137,7 +138,7 @@ export function renderListSidebar() {
         <span class="truncate">${escapeHtml(l.name)}</span>
         <span class="text-xs text-zinc-500 ml-2">${l.count}</span>
       </button>
-      <button class="list-del text-zinc-500 hover:text-rose-400 px-1" title="削除" data-list-id="${l.id}">×</button>
+      <button class="list-del text-zinc-500 hover:text-rose-400 px-1" title="削除" aria-label="削除" data-list-id="${l.id}">${icon('x')}</button>
     </div>`;
   }).join('');
   $$('.list-btn').forEach(b => b.addEventListener('click', () => {
@@ -180,12 +181,12 @@ export function renderFilterChips() {
   const chips = [];
   if (f.list_id) {
     const l = state.lists.find(x => x.id === f.list_id);
-    if (l) chips.push(`<span class="chip active rounded px-3 py-1 text-sm cursor-pointer" data-clear="list_id">📋 ${escapeHtml(l.name)} ✕</span>`);
+    if (l) chips.push(`<span class="chip active rounded px-3 py-1 text-sm cursor-pointer inline-flex items-center gap-1" data-clear="list_id">${icon('list')} ${escapeHtml(l.name)} ${icon('x')}</span>`);
   }
-  if (f.author) chips.push(`<span class="chip active rounded px-3 py-1 text-sm cursor-pointer" data-clear="author">@${escapeHtml(f.author)} ✕</span>`);
-  if (f.tag)    chips.push(`<span class="chip active rounded px-3 py-1 text-sm cursor-pointer" data-clear="tag">#${escapeHtml(f.tag)} ✕</span>`);
-  if (f.media_type) chips.push(`<span class="chip active rounded px-3 py-1 text-sm cursor-pointer" data-clear="media_type">${escapeHtml(f.media_type)} ✕</span>`);
-  if (f.q)      chips.push(`<span class="chip active rounded px-3 py-1 text-sm cursor-pointer" data-clear="q">"${escapeHtml(f.q)}" ✕</span>`);
+  if (f.author) chips.push(`<span class="chip active rounded px-3 py-1 text-sm cursor-pointer inline-flex items-center gap-1" data-clear="author">@${escapeHtml(f.author)} ${icon('x')}</span>`);
+  if (f.tag)    chips.push(`<span class="chip active rounded px-3 py-1 text-sm cursor-pointer inline-flex items-center gap-1" data-clear="tag">#${escapeHtml(f.tag)} ${icon('x')}</span>`);
+  if (f.media_type) chips.push(`<span class="chip active rounded px-3 py-1 text-sm cursor-pointer inline-flex items-center gap-1" data-clear="media_type">${escapeHtml(f.media_type)} ${icon('x')}</span>`);
+  if (f.q)      chips.push(`<span class="chip active rounded px-3 py-1 text-sm cursor-pointer inline-flex items-center gap-1" data-clear="q">"${escapeHtml(f.q)}" ${icon('x')}</span>`);
   $('#filterChips').innerHTML = chips.join('');
   $$('#filterChips [data-clear]').forEach(el => el.addEventListener('click', () => {
     const k = el.dataset.clear;
@@ -261,7 +262,7 @@ export async function renderAuthorHeader() {
 $('#tagToggle').addEventListener('click', () => {
   const list = $('#tagList');
   const collapsed = list.classList.toggle('hidden');
-  $('#tagToggleIcon').textContent = collapsed ? '▶' : '▼';
+  $('#tagToggleIcon').querySelector('.icon-chevron')?.classList.toggle('open', !collapsed);
 });
 
 // --- Author single-count section toggle ---------------------------
@@ -271,7 +272,7 @@ document.addEventListener('click', (e) => {
     const list = $('#authorSingleList');
     const opening = list.classList.toggle('hidden');
     btn.dataset.open = opening ? '0' : '1';
-    btn.querySelector('span').textContent = opening ? '▶' : '▼';
+    btn.querySelector('.icon-chevron')?.classList.toggle('open', !opening);
   }
 });
 

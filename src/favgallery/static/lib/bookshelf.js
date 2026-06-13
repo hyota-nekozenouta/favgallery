@@ -3,6 +3,7 @@
 import { state } from 'state';
 import { $, escapeHtml } from 'dom';
 import { openReader } from 'reader';
+import { icon } from 'icons';
 
 state.books = [];
 state._importPoll = null;
@@ -62,7 +63,7 @@ function renderBooks() {
     return `<div class="tile cursor-pointer" data-book-id="${b.id}">
       ${cover ? `<img data-cover="${cover}" loading="lazy" decoding="async" alt="" />` : '<div class="bg-zinc-800 w-full" style="min-height:200px"></div>'}
       <button class="del-btn" data-del-book="${b.id}" title="削除">🗑</button>
-      <button class="fav-btn ${favClass}" data-fav-book="${b.id}" title="お気に入り">♥</button>
+      <button class="fav-btn ${favClass}" data-fav-book="${b.id}" title="お気に入り" aria-label="お気に入り">${icon('heart')}</button>
       <div class="info" style="opacity:1;position:relative;padding:8px 10px;background:rgba(0,0,0,.7)">
         <div class="truncate font-medium">${escapeHtml(b.title)}</div>
         <div class="text-zinc-400 text-xs">${b.page_count} ページ</div>
@@ -320,7 +321,7 @@ function renderImportQueue(queue) {
   el.innerHTML = queue.map(item => {
     const shortUrl = item.url.length > 40 ? item.url.slice(0, 37) + '...' : item.url;
     let badge = '';
-    if (item.status === 'running') badge = '<span class="text-indigo-400">⏳ ' + escapeHtml(item.progress || 'DL中') + '</span>';
+    if (item.status === 'running') badge = '<span class="text-indigo-400 inline-flex items-center gap-1">' + icon('loader', 'icon-spin') + ' ' + escapeHtml(item.progress || 'DL中') + '</span>';
     else if (item.status === 'done') badge = '<span class="text-green-400">✓ 完了</span>';
     else if (item.status === 'skipped') badge = '<span class="text-amber-400">⊘ 重複スキップ' + (item.matched_title ? '（' + escapeHtml(item.matched_title) + '）' : '') + '</span>';
     else if (item.status === 'error') badge = '<span class="text-red-400">✗ ' + escapeHtml((item.error || '').slice(0, 30)) + '</span>';

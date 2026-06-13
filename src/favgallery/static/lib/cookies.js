@@ -2,6 +2,7 @@
 // notices.js とは相互参照 (showNotice ←→ openCookieModal) — ES module 循環 import で解決。
 import { $, escapeHtml } from 'dom';
 import { showNotice } from 'notices';
+import { icon } from 'icons';
 
 export async function loadCookieStatus() {
   const el = $('#cookieStatus');
@@ -35,7 +36,7 @@ export function openCookieModal() {
     <div class="bg-zinc-900 border border-zinc-800 rounded-lg w-full max-w-lg p-4 space-y-3 m-auto">
       <div class="flex items-center justify-between">
         <div class="text-sm text-zinc-200 font-medium">X cookies の設定 <span class="text-zinc-600 text-xs">v${window.APP_VERSION}</span></div>
-        <button id="cookieCloseBtn" class="text-zinc-400 hover:text-white text-xl leading-none">×</button>
+        <button id="cookieCloseBtn" class="text-zinc-400 hover:text-white leading-none" aria-label="閉じる">${icon('x')}</button>
       </div>
       <div id="cookieCurStatus" class="text-xs text-zinc-400">状態を確認中…</div>
       <p class="text-xs text-zinc-500 leading-relaxed">

@@ -11,6 +11,7 @@ import { loadLibrary, loadLists, loadFavoriteAuthors, renderFilterChips } from '
 import { loadLastSeen, setupSeenObserver } from 'timeline';
 import { pollSync } from 'sync';
 import { loadMe } from 'mylikes';
+import { icon } from 'icons';
 
 // --- Tabs ----------------------------------------------------------
 function switchTab(tab) {
@@ -50,7 +51,7 @@ function updateReelHeight() {
 function setLayout(mode) {
   state.layout = mode;
   $('#grid').classList.toggle('reel-mode', mode === 'reel');
-  $('#layoutToggle').textContent = mode === 'reel' ? '▤' : '▦';
+  $('#layoutToggle').innerHTML = icon(mode === 'reel' ? 'rows' : 'grid');
   if (mode === 'reel') updateReelHeight();
   state.offset = 0; state.posts = [];
   fetchPosts();

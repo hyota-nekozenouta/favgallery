@@ -5,6 +5,7 @@ import { $, $$, escapeHtml } from 'dom';
 import { renderAuthors, renderTags, renderFilterChips } from 'library';
 import { fetchPosts, deletePost, markLikedEverywhere } from 'posts';
 import { openListPopover, closeListPopover } from 'popovers';
+import { icon } from 'icons';
 
 // state.lb.items holds every post sharing the same tweet_id (sorted by num).
 // state.lb.pos is the index within items currently shown.
@@ -60,7 +61,7 @@ export function renderLightbox() {
   const fromUnliked = state.lb.source === 'unliked';
   const showLikeBtn = state.tab === 'timeline' || fromUnliked;
   const lbActionBtn = showLikeBtn
-    ? `<button id="lbLikeBtn" class="bg-rose-600 hover:bg-rose-500 text-white text-sm rounded px-3 py-1">♥ いいね & 保存</button>`
+    ? `<button id="lbLikeBtn" class="inline-flex items-center gap-1 bg-rose-600 hover:bg-rose-500 text-white text-sm rounded px-3 py-1">${icon('heart')} いいね & 保存</button>`
     : `<button id="lbDelBtn" class="bg-red-700 hover:bg-red-600 text-white text-sm rounded px-3 py-1">🗑 削除</button>`;
   // List membership only makes sense for posts already in the local archive.
   const lbAddBtn = fromUnliked
@@ -81,8 +82,8 @@ export function renderLightbox() {
     ${tags ? `<div class="flex flex-wrap gap-1 mb-2">${tags}</div>` : ''}
     <div class="text-zinc-500 text-xs flex gap-3 flex-wrap">
       <span>${escapeHtml(p.date)}</span>
-      ${p.favorite_count ? `<span>♥ ${p.favorite_count.toLocaleString()}</span>` : ''}
-      ${p.view_count ? `<span>👁 ${p.view_count.toLocaleString()}</span>` : ''}
+      ${p.favorite_count ? `<span class="inline-flex items-center gap-1">${icon('heart')} ${p.favorite_count.toLocaleString()}</span>` : ''}
+      ${p.view_count ? `<span class="inline-flex items-center gap-1">${icon('eye')} ${p.view_count.toLocaleString()}</span>` : ''}
       ${p.width ? `<span>${p.width}×${p.height}</span>` : ''}
     </div>`;
 
@@ -122,7 +123,7 @@ export function renderLightbox() {
   if (lbLike) lbLike.addEventListener('click', async (e) => {
     e.stopPropagation();
     lbLike.disabled = true;
-    lbLike.textContent = '⏳ いいね & 保存中…';
+    lbLike.innerHTML = `${icon('loader','icon-spin')} いいね & 保存中…`;
     try {
       const r = await fetch('/api/timeline/like-and-save', {
         method: 'POST',

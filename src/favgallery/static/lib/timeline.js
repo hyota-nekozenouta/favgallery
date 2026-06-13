@@ -70,6 +70,16 @@ $('#markSeenBtn').addEventListener('click', async () => {
 });
 
 // --- Timeline refresh ---------------------------------------------
+// 取得ボタンのアイコン/ラベルを更新 (index.html でアイコン #timelineRefreshIcon と
+// ラベル #timelineRefreshLabel を分離済み)。読込中はローダーへ差し替え + 回転。
+function setRefreshState(loading, tag = '') {
+  const use = document.querySelector('#timelineRefreshIcon use');
+  const svg = document.getElementById('timelineRefreshIcon');
+  const label = document.getElementById('timelineRefreshLabel');
+  if (use) use.setAttribute('href', loading ? '#ic-loader' : '#ic-download');
+  if (svg) svg.classList.toggle('icon-spin', loading);
+  if (label) label.textContent = loading ? '取得中…' : `取得${tag}`;
+}
 async function triggerTimelineRefresh() {
   // Honored quietly: cooldown 429 is not a user-facing error.
   try {
@@ -77,7 +87,7 @@ async function triggerTimelineRefresh() {
     if (r.status === 429) return;       // cooldown — fine, will fire again later
     if (!r.ok) return;
   } catch { return; }
-  $('#timelineRefreshBtn').textContent = '⏳ 取得中…';
+  setRefreshState(true);
   pollTimeline();
 }
 
@@ -93,7 +103,7 @@ async function pollTimeline() {
     return;
   }
   const tag = s.last_added ? ` (+${s.last_added})` : '';
-  $('#timelineRefreshBtn').textContent = `⟳ 取得${tag}`;
+  setRefreshState(false, tag);
   $('#timelineRefreshBtn').disabled = false;
   if (s.auth_error) {
     notifyAuthFailure();
