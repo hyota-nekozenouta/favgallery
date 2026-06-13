@@ -16,3 +16,11 @@ htmlcov/
 
 # Brainstorming visual companion scratch
 .superpowers/
+
+# Self-host runtime data & secrets (never commit your own library/cookies/env)
+data/
+.env
+cookies.txt
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

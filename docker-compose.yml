@@ -1,0 +1,19 @@
+# FavGallery — local self-host via Docker Compose.
+#   docker compose up --build   →  http://localhost:8000
+# Media / SQLite DB / cookies persist to ./data on the host.
+# Runs zero-config (no R2, no auth). Set X cookies via the in-app ⚙ → 🔑 panel.
+services:
+  favgallery:
+    build: .
+    image: favgallery:local
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+    environment:
+      - FAVGALLERY_LIBRARY_ROOT=/data/library
+    # To enable Basic auth / Cloudflare R2 / cookie seeding, copy
+    # .env.example to .env and uncomment the two lines below:
+    # env_file:
+    #   - .env
+    restart: unless-stopped

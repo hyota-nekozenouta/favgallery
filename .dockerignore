@@ -1,0 +1,22 @@
+# Keep the build context small and avoid copying host-specific / generated files
+# into the image (especially .venv, which is platform-specific and would break).
+.venv/
+data/
+.git/
+.gitignore
+.dockerignore
+dist/
+build/
+wheels/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+__pycache__/
+*.py[oc]
+.env
+cookies.txt
+*.sqlite*
+.superpowers/
+node_modules/
