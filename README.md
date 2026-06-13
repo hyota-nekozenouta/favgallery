@@ -14,7 +14,9 @@ X(Twitter) でいいねした画像・動画を、自分のサーバーに保存
 - ローカル保存 or Cloudflare R2（任意）
 - 画像の重複排除（Pillow + imagehash）
 
-> スクリーンショット: `docs/screenshot.png`（後で追加）
+![FavGallery のギャラリー画面](docs/screenshot.png)
+
+<sub>※ スクリーンショットはデモ用の自動生成アート（`scripts/demo_preview.py`）です。実データではありません。</sub>
 
 ## クイックスタート
 
