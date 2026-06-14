@@ -38,7 +38,7 @@ function authorRowHtml(a) {
   const isActive = state.filter.author === a.name;
   const isFav = state.favoriteAuthors.has(a.name);
   return `<div class="flex items-center gap-0.5">
-    <button class="author-btn flex-1 min-w-0 text-left px-2 py-1.5 rounded text-sm flex items-center justify-between ${isActive ? 'bg-indigo-600/20 text-indigo-300' : 'hover:bg-zinc-800 text-zinc-300'}"
+    <button class="author-btn flex-1 min-w-0 text-left px-2 py-1.5 rounded text-sm flex items-center justify-between ${isActive ? 'author-active bg-indigo-600/20 text-indigo-300' : 'hover:bg-zinc-800 text-zinc-300'}"
             data-author="${escapeHtml(a.name)}">
       <span class="truncate min-w-0">
         ${isFav ? '<span class="text-yellow-400 text-xs mr-0.5">★</span>' : ''}
@@ -52,16 +52,25 @@ function authorRowHtml(a) {
   </div>`;
 }
 
-function bindAuthorEvents(container) {
-  container.querySelectorAll('.author-btn').forEach(b => b.addEventListener('click', () => {
-    const name = b.dataset.author;
-    state.filter.author = state.filter.author === name ? null : name;
-    state.offset = 0; state.posts = [];
-    renderAuthors(); renderFilterChips(); fetchPosts();
-  }));
-  container.querySelectorAll('.fav-btn').forEach(b => b.addEventListener('click', (e) => {
+// 作者リストのクリックは「イベント委譲」でコンテナに1回だけバインドする。
+// 旧実装は renderAuthors のたびに全ボタンへ addEventListener を貼り直していたため、
+// 作者数が多いと1クリックごとに「全行 DOM の破棄→再生成 + 数千リスナー再バインド」が
+// 同期実行されて激重だった（2026-06-14 perf 修正）。
+let _authorEventsBound = false;
+function initAuthorEvents() {
+  if (_authorEventsBound) return;
+  for (const sel of ['#authorList', '#authorSingleList']) {
+    const el = $(sel);
+    if (el) el.addEventListener('click', onAuthorListClick);
+  }
+  _authorEventsBound = true;
+}
+
+function onAuthorListClick(e) {
+  const favBtn = e.target.closest('.fav-btn');
+  if (favBtn) {
     e.stopPropagation();
-    const name = b.dataset.author;
+    const name = favBtn.dataset.author;
     if (state.favoriteAuthors.has(name)) {
       state.favoriteAuthors.delete(name);
     } else {
@@ -72,11 +81,41 @@ function bindAuthorEvents(container) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ authors: [...state.favoriteAuthors] }),
     });
-    renderAuthors();
-  }));
+    renderAuthors(); // お気に入りは並び替え（上に集約）が要るので全再生成。頻度は低い。
+    return;
+  }
+  const authBtn = e.target.closest('.author-btn');
+  if (authBtn) {
+    const name = authBtn.dataset.author;
+    state.filter.author = state.filter.author === name ? null : name;
+    state.offset = 0; state.posts = [];
+    markActiveAuthor(); // 全再生成せず、ハイライトだけ差し替え（激重の根治）
+    renderFilterChips();
+    fetchPosts();
+  }
+}
+
+// 作者行のアクティブ表示だけを切り替える（DOM 破棄・リスナー再バインドなし）。
+function setAuthorBtnActive(btn, active) {
+  btn.classList.toggle('author-active', active);
+  btn.classList.toggle('bg-indigo-600/20', active);
+  btn.classList.toggle('text-indigo-300', active);
+  btn.classList.toggle('hover:bg-zinc-800', !active);
+  btn.classList.toggle('text-zinc-300', !active);
+}
+
+export function markActiveAuthor() {
+  // 直前にアクティブだった行（最大1つ）を非アクティブへ戻す。
+  $$('.author-btn.author-active').forEach(b => setAuthorBtnActive(b, false));
+  const name = state.filter.author;
+  if (!name) return;
+  for (const b of $$('.author-btn')) {
+    if (b.dataset.author === name) { setAuthorBtnActive(b, true); break; }
+  }
 }
 
 export function renderAuthors() {
+  initAuthorEvents(); // 委譲リスナーを一度だけ設置（冪等）
   const favSet = state.favoriteAuthors;
   const multi = state.authors.filter(a => a.post_count > 1);
   const single = state.authors.filter(a => a.post_count === 1);
@@ -86,9 +125,7 @@ export function renderAuthors() {
   ];
   $('#authorTotal').textContent = `${state.authors.length} 人`;
 
-  const mainEl = $('#authorList');
-  mainEl.innerHTML = sortGroup(multi).map(authorRowHtml).join('');
-  bindAuthorEvents(mainEl);
+  $('#authorList').innerHTML = sortGroup(multi).map(authorRowHtml).join('');
 
   const singleSection = $('#authorSingleSection');
   const singleList = $('#authorSingleList');
@@ -97,7 +134,6 @@ export function renderAuthors() {
     const btn = $('#authorSingleToggle');
     btn.querySelector('.icon-chevron')?.classList.toggle('open', btn.dataset.open === '1');
     singleList.innerHTML = sortGroup(single).map(authorRowHtml).join('');
-    bindAuthorEvents(singleList);
   } else {
     singleSection.classList.add('hidden');
   }
@@ -193,7 +229,7 @@ export function renderFilterChips() {
     state.filter[k] = (k === 'media_type') ? '' : null;
     if (k === 'q') { $('#searchBox').value = ''; state.filter.q = ''; }
     state.offset = 0; state.posts = [];
-    renderAuthors(); renderTags(); renderListSidebar(); renderFilterChips(); fetchPosts();
+    markActiveAuthor(); renderTags(); renderListSidebar(); renderFilterChips(); fetchPosts();
   }));
 }
 

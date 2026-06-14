@@ -2,7 +2,7 @@
 // (Phase 4B: main.js から分離。posts/library/popovers と相互参照 — ES module 循環 import)
 import { state } from 'state';
 import { $, $$, escapeHtml } from 'dom';
-import { renderAuthors, renderTags, renderFilterChips } from 'library';
+import { markActiveAuthor, renderTags, renderFilterChips } from 'library';
 import { fetchPosts, deletePost, markLikedEverywhere } from 'posts';
 import { openListPopover, closeListPopover } from 'popovers';
 import { icon } from 'icons';
@@ -98,7 +98,7 @@ export function renderLightbox() {
     closeLightbox();
     state.filter.author = name;
     state.offset = 0; state.posts = [];
-    renderAuthors(); renderFilterChips(); fetchPosts();
+    markActiveAuthor(); renderFilterChips(); fetchPosts();
   }));
   const lbAdd = $('#lbAddBtn');
   if (lbAdd) lbAdd.addEventListener('click', (e) => {
