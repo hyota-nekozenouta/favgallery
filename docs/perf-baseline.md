@@ -40,3 +40,29 @@
 - /api/posts は毎回 `all_listed_post_keys()` で DB 全読み / /api/books は books × book_tags の N+1
 - メディア・サムネは weak ETag（毎回 revalidation）
 - SQLite jounal_mode=DELETE（WAL 未設定）
+
+## v0.6.1 再計測（2026-06-22）
+
+UI 刷新（v0.5.0）+ OSS セルフホスト公開対応（v0.6.0）+ 作者絞り込み描画軽量化（v0.6.1）の累積後。
+計測条件は同一（合成 3,000 posts / 1,500 timeline / 60 books・TestClient・30 回中央値）。
+
+| endpoint | before p50<br>(リファクタ前) | phase1 p50<br>(2026-06-10) | **v0.6.1 p50**<br>(2026-06-22) | 累積差 |
+|---|---|---|---|---|
+| GET /api/library | 38.98ms | 11.50ms | **5.31ms** | **-86%** |
+| GET /api/posts?limit=60 | 38.38ms | 11.12ms | **4.55ms** | **-88%** |
+| GET /api/posts?author= | 53.66ms | 12.28ms | **4.96ms** | **-91%** |
+| GET /api/posts?q=sample | 21.90ms | — | **6.73ms** | -69% |
+| GET /api/timeline | 29.65ms | — | **10.58ms** | -64% |
+| GET /api/timeline?media_type=video | 24.93ms | 20.88ms | **9.00ms** | **-64%** |
+| GET /api/timeline?hide_liked=true | 26.05ms | — | **8.74ms** | -66% |
+| GET /api/books | 17.77ms | 13.32ms | **5.37ms** | **-70%** |
+| GET /api/books/tags | 7.70ms | — | **4.50ms** | -42% |
+| GET / (index) | 9.59ms | — | **4.62ms** | -52% |
+
+**観測**:
+- ほぼ全 endpoint で p50 5〜10ms 台に収束。p95 も 15ms 以下で安定。
+- 作者絞り込み（v0.6.1 軽量化）は再計測でも改善継続を確認（53.66 → 4.96ms = -91%）。
+- timeline 系は Phase 1 時点で計測が不安定だった（30→51ms の run 間ノイズ）が v0.6.1 では 10ms 台で安定。
+- 構造的コスト（自動同期・Tailwind CDN）は v0.6.0 で大半が解消済み（CDN → 事前生成 CSS / 自動同期 opt-out 環境変数 `FAVGALLERY_AUTOSYNC_ON_LOAD=0`）。
+- メタデータ Cache-Control は引き続き意図的に見送り（新着不可視バグ回避・既存メモ通り）。
+
