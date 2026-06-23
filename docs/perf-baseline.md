@@ -66,3 +66,22 @@ UI 刷新（v0.5.0）+ OSS セルフホスト公開対応（v0.6.0）+ 作者絞
 - 構造的コスト（自動同期・Tailwind CDN）は v0.6.0 で大半が解消済み（CDN → 事前生成 CSS / 自動同期 opt-out 環境変数 `FAVGALLERY_AUTOSYNC_ON_LOAD=0`）。
 - メタデータ Cache-Control は引き続き意図的に見送り（新着不可視バグ回避・既存メモ通り）。
 
+## Railway 実測 — Hobby 超過予防ベースライン（2026-06-23）
+
+「体験は変えずに Railway コストを抑える」相談を起点に、5 段階プラン（`~/.claude/plans/railway-zany-oasis.md`）の段階 0 として Railway / Cloudflare の実測値をベースライン記録する欄。段階 1〜3 commit 後の効果差分を測る母数。
+
+| 観点 | 値 | 取得元 | メモ |
+|---|---|---|---|
+| Railway Egress GB (過去 7 日) | _要記録_ | Railway dashboard → favgallery → Metrics | Hobby 月 100GB が主超過軸 |
+| Railway CPU time (過去 7 日) | _要記録_ | 同上 | 同時 8 vCPU だが課金は usage |
+| Railway Volume GB | _要記録_ | 同上 | SQLite DB + cookies.txt（メディアは R2） |
+| Cloudflare Cached request ratio | _要記録_ | CF dashboard → Analytics → Traffic | 段階 1 immutable 化前は 0% に近い想定 |
+
+段階 1 (v0.6.2 / gzip + lib/*.js immutable) commit 後の 7 日後・14 日後に同じ表を取り、差分を「## Railway 実測 (YYYY-MM-DD 段階 N 後)」として下に追加する。
+
+### v0.6.2 段階 1 変更点（commit hash 後ほど追記）
+
+- `_register_http_shell_middleware` に `GZipMiddleware(minimum_size=1024)` 追加（lib/*.js 計 ~114KB → ~30KB 圧縮見込み）
+- `/static/lib/*.js` を `style.css` と同じ `public, max-age=31536000, immutable` に格上げ（index.html の import map で 15 モジュール全部に `?v=ASSET_VERSION` が解決済み・Phase 4B / 2026-06-10 のスマホ古キャッシュ事故は構造的に再発しない）
+- 401 時の no-cache フォールバックは維持（lib/*.js / style.css 双方で「認証失敗が 1 年キャッシュされる事故」を防ぐ）
+

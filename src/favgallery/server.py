@@ -12,6 +12,7 @@ import threading
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -206,14 +207,20 @@ def _make_basic_auth_middleware():
 
 
 def _register_http_shell_middleware(app: FastAPI) -> None:
-    """Version stamp + /static cache policy (Phase 6 で create_app から分離).
+    """Version stamp + /static cache policy + gzip (Phase 6 で create_app から分離).
 
     Outermost middleware (last added runs first): version-stamp every response,
     including the auth middleware's 401s. /static のキャッシュ方針:
-    - style.css は ?v=__ASSET_VERSION__ 付き参照のため immutable 長期キャッシュ可
-    - それ以外 (lib/*.js 含む) は no-cache — ES module の深い import は ?v= を
-      運べず、スマホ古キャッシュ事故 (v0.2.3) を構造的に再発させないため
+    - style.css と lib/*.js は ?v=__ASSET_VERSION__ 付き参照
+      (index.html の import map で全 ES モジュールがバージョン付き URL に解決済み・
+      Phase 4B 2026-06-10) のため immutable 長期キャッシュ可
+    - それ以外の /static (将来のフォントや画像) は no-cache フォールバック
+
+    gzip 圧縮: lib/*.js 計 ~115KB → ~30KB に縮め Railway egress を圧縮
+    (v0.6.2 Hobby 超過予防). minimum_size=1024 で jpeg/mp4 等の StreamingResponse は
+    自動除外 (二重圧縮にならない).
     """
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
 
     @app.middleware("http")
     async def add_version_header(request: Request, call_next):
@@ -224,7 +231,8 @@ def _register_http_shell_middleware(app: FastAPI) -> None:
             # 成功応答のみ長期キャッシュ可。401 等に immutable を付けると
             # 認証失敗がキャッシュされ続ける事故になりうる (2026-06-10)。
             ok = response.status_code in (200, 304)
-            if path == "/static/style.css" and ok:
+            is_versioned_asset = path == "/static/style.css" or path.startswith("/static/lib/")
+            if is_versioned_asset and ok:
                 response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
             else:
                 response.headers["Cache-Control"] = "no-cache"

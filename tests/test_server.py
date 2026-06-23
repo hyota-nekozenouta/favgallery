@@ -753,9 +753,9 @@ def test_media_and_thumb_etags_are_strong(client: TestClient) -> None:
 
 @pytest.mark.integration
 def test_prebuilt_css_served_with_long_cache(client: TestClient) -> None:
-    """Phase 3: 事前生成 CSS は ?v= 付き参照なので immutable 長期キャッシュ。
-    それ以外の /static (将来の lib/*.js 含む) は no-cache (v0.2.3 の教訓:
-    ES module の深い import は ?v= を運べない)。"""
+    """事前生成 CSS は ?v= 付き参照なので immutable 長期キャッシュ。
+    Phase 4B (2026-06-10) で import map が lib/*.js も ?v= 解決するようになり、
+    lib/*.js も同方針 (test_lib_js_module_served_with_long_cache 参照)。"""
     r = client.get("/static/style.css")
     assert r.status_code == 200
     assert r.headers.get("Cache-Control") == "public, max-age=31536000, immutable"
@@ -787,12 +787,15 @@ def test_static_css_401_is_not_long_cached(
 
 
 @pytest.mark.integration
-def test_main_js_module_served_no_cache(client: TestClient) -> None:
-    """Phase 4: 分割した JS モジュールは no-cache 配信 (深い import は ?v= を
-    運べないため長期キャッシュ禁止 / v0.2.3 の教訓)。"""
+def test_lib_js_module_served_with_long_cache(client: TestClient) -> None:
+    """lib/*.js は ?v= 付き参照 (index.html の import map で全モジュール解決済み /
+    Phase 4B 2026-06-10) なので style.css と同じ immutable 長期キャッシュ。
+    v0.6.2 で no-cache から格上げ (Railway egress 削減 / Hobby 超過予防)。
+    2026-06-10 のスマホ古キャッシュ事故は ASSET_VERSION (コンテンツハッシュ) +
+    import map で構造的に再発しない."""
     r = client.get("/static/lib/main.js")
     assert r.status_code == 200
-    assert r.headers.get("Cache-Control") == "no-cache"
+    assert r.headers.get("Cache-Control") == "public, max-age=31536000, immutable"
 
 
 @pytest.mark.integration
@@ -823,3 +826,37 @@ def test_index_references_versioned_module_entry(client: TestClient) -> None:
     # bootstrap (エラーレポータ + APP_VERSION) は inline に残っていること
     assert "window.APP_VERSION" in html
     assert "reportClientError" in html
+
+
+@pytest.mark.integration
+def test_static_lib_js_401_is_not_long_cached(
+    monkeypatch: pytest.MonkeyPatch, fake_library: Path
+) -> None:
+    """v0.6.2: lib/*.js を immutable 化したが、認証前の 401 は no-cache を維持。
+    style.css の対称テスト (test_static_css_401_is_not_long_cached) と同方針 —
+    401 が 1 年キャッシュされる事故防止。"""
+    monkeypatch.setenv("FAVGALLERY_USER", "u")
+    monkeypatch.setenv("FAVGALLERY_PASSWORD", "p")
+    app = create_app(library_root=fake_library, scan_in_background=False)
+    c = TestClient(app, raise_server_exceptions=False)
+    r = c.get("/static/lib/main.js")
+    assert r.status_code == 401
+    assert r.headers.get("Cache-Control") == "no-cache"
+
+
+@pytest.mark.integration
+def test_lib_js_gzip_compressed_for_capable_clients(client: TestClient) -> None:
+    """v0.6.2: GZipMiddleware を有効化。Accept-Encoding: gzip を受けると圧縮配信。
+    lib/*.js (~114KB 計) を ~30KB に縮めて Railway egress を削減 (Hobby 超過予防)。
+    main.js (7.8KB) は minimum_size=1024 を超えるので圧縮対象。"""
+    r = client.get("/static/lib/main.js", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200
+    assert r.headers.get("Content-Encoding") == "gzip"
+
+
+@pytest.mark.integration
+def test_lib_js_uncompressed_when_gzip_not_accepted(client: TestClient) -> None:
+    """gzip 非対応クライアントには無圧縮配信 (互換性保持)。"""
+    r = client.get("/static/lib/main.js", headers={"Accept-Encoding": "identity"})
+    assert r.status_code == 200
+    assert "gzip" not in (r.headers.get("Content-Encoding") or "")
