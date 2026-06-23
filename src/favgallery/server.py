@@ -117,9 +117,10 @@ def _resolve_asset_version(static_dir: Path) -> str:
     版が上がり SemVer の意味が壊れる。資産トークンは「内容が変わった時だけ」変わる
     べきで、それはコンテンツハッシュが正確に満たす。app version は表示専用に戻す。
 
-    対象は ?v= 付きで参照される style.css + lib/*.js のみ (index.html 自体は
-    no-cache 配信なのでトークン不要)。ファイル名もハッシュに含めるので、モジュール
-    追加・リネームでもトークンが変わる。内容が同じデプロイでは不変 = 不要な再取得なし。
+    対象は ?v= 付きで参照される style.css + lib/*.js + manifest.webmanifest +
+    icons/*.png (index.html 自体は no-cache 配信なのでトークン不要)。ファイル名も
+    ハッシュに含めるので、モジュール追加・リネーム・アイコン差し替えでもトークンが
+    変わる。内容が同じデプロイでは不変 = 不要な再取得なし。
     """
     h = hashlib.sha256()
     paths: list[Path] = []
@@ -129,6 +130,12 @@ def _resolve_asset_version(static_dir: Path) -> str:
     lib_dir = static_dir / "lib"
     if lib_dir.exists():
         paths.extend(sorted(lib_dir.glob("*.js")))
+    manifest = static_dir / "manifest.webmanifest"
+    if manifest.exists():
+        paths.append(manifest)
+    icons_dir = static_dir / "icons"
+    if icons_dir.exists():
+        paths.extend(sorted(icons_dir.glob("*.png")))
     for p in paths:
         h.update(p.name.encode("utf-8"))
         h.update(b"\0")
@@ -231,7 +238,11 @@ def _register_http_shell_middleware(app: FastAPI) -> None:
             # 成功応答のみ長期キャッシュ可。401 等に immutable を付けると
             # 認証失敗がキャッシュされ続ける事故になりうる (2026-06-10)。
             ok = response.status_code in (200, 304)
-            is_versioned_asset = path == "/static/style.css" or path.startswith("/static/lib/")
+            is_versioned_asset = (
+                path == "/static/style.css"
+                or path.startswith("/static/lib/")
+                or path.startswith("/static/icons/")
+            )
             if is_versioned_asset and ok:
                 response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
             else:
@@ -252,6 +263,22 @@ def _register_shell_routes(app: FastAPI, static_dir: Path) -> None:
         # no-cache: SPA シェルを端末キャッシュさせない。デプロイ後にスマホが
         # 古い JS を使い回し「直したのに変わらない」が起きた (2026-06-10)。
         return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+
+    @app.get("/manifest.webmanifest")
+    def pwa_manifest() -> Response:
+        """PWA manifest を専用 route で配信 (root 配置 = scope:"/" と整合)。
+
+        StaticFiles 任せだと OS の mimetypes レジストリ依存で MIME がブレるため
+        (Windows で application/octet-stream になる既知バグあり)、ここで
+        application/manifest+json を明示する。Cache-Control は no-cache —
+        index.html と同方針で、デプロイ後は常に最新を取らせる。
+        """
+        body = (static_dir / "manifest.webmanifest").read_text(encoding="utf-8")
+        return Response(
+            content=body,
+            media_type="application/manifest+json",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     @app.post("/api/client-log")
     async def client_log(request: Request) -> Response:

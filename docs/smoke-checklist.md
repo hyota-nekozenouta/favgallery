@@ -47,3 +47,30 @@
 - [ ] 手動 ⟳ 同期ボタンは常に動く
 - [ ] `curl -sI` の X-App-Version が期待版
 - [ ] デプロイ 24h 後 Railway logs に client-log エラーなし
+
+
+## PWA インストール (v0.6.3〜)
+
+### iOS Safari (iPhone 実機)
+- [ ] Safari で本番 URL を開く → 共有メニュー → 「ホーム画面に追加」が出る
+- [ ] アプリ名が "FavGallery" で出る (apple-mobile-web-app-title)
+- [ ] アイコンが正方角丸で表示される (apple-touch-icon.png 180x180)
+- [ ] ホーム画面から起動 → アドレスバー / Safari UI なしで開く (standalone)
+- [ ] ステータスバーが黒に溶け込む (black-translucent + safe-area-inset)
+- [ ] ★ Basic 認証ダイアログの挙動を記録 (毎回/初回/出ない → Phase B 判断材料)
+
+### Android Chrome (Pixel / 一般実機)
+- [ ] 右上メニュー → 「アプリをインストール」が出る (出なければ Phase C GO)
+- [ ] インストール後ホーム画面アイコンが正円 / 角丸で出る (maskable 安全領域 OK)
+- [ ] 起動 → standalone (URL バーなし)
+- [ ] スプラッシュ画面の背景が黒 (background_color: #000000)
+
+### Windows Edge / Chrome
+- [ ] アドレスバー右端に install アイコンが出る
+- [ ] インストール → スタートメニューに登録される
+- [ ] ウィンドウのタイトルバー色が X ブルー (theme_color: #1d9bf0)
+
+### 共通
+- [ ] `curl -sI https://<domain>/manifest.webmanifest` で 200 + application/manifest+json + X-App-Version 0.6.3
+- [ ] `curl -sI` の `cf-cache-status` が MISS / DYNAMIC (HIT で固まったら CF page rule 要確認)
+- [ ] 各プラットフォーム standalone 起動から いいね / フォロー中 / 本棚 / リール / リーダー / 設定 を一通り回帰なし

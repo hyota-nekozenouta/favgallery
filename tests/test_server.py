@@ -860,3 +860,110 @@ def test_lib_js_uncompressed_when_gzip_not_accepted(client: TestClient) -> None:
     r = client.get("/static/lib/main.js", headers={"Accept-Encoding": "identity"})
     assert r.status_code == 200
     assert "gzip" not in (r.headers.get("Content-Encoding") or "")
+
+
+# --- PWA (v0.6.3) ---------------------------------------------------------
+# iOS / Android / Windows のホーム画面アイコンから standalone 起動するための
+# Web App Manifest + アイコン群 + iOS 専用 meta tags を提供する。manifest は
+# /manifest.webmanifest 直下 (scope:"/" と整合) で配信し、icons/*.png は
+# ASSET_VERSION 連動の ?v= で 1 年 immutable キャッシュする。
+
+
+@pytest.mark.integration
+def test_pwa_manifest_served_with_correct_mime(client: TestClient) -> None:
+    """manifest は application/manifest+json で配信 + display=standalone 等の必須要素を含む。
+    StaticFiles 任せだと OS の mimetypes 依存で MIME がブレるため専用 route で明示。"""
+    r = client.get("/manifest.webmanifest")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/manifest+json")
+    data = r.json()
+    assert data["display"] == "standalone"
+    assert data["start_url"] == "/"
+    assert data["scope"] == "/"
+    assert data["name"] == "FavGallery"
+    assert data["background_color"] == "#000000"
+    assert data["theme_color"] == "#1d9bf0"
+    assert len(data["icons"]) >= 3  # 192 + 512 + 512-maskable
+    assert any(icon.get("purpose") == "maskable" for icon in data["icons"])
+
+
+@pytest.mark.integration
+def test_pwa_manifest_no_cache(client: TestClient) -> None:
+    """manifest は index.html と同じ no-cache (常に最新を取らせる)。"""
+    r = client.get("/manifest.webmanifest")
+    assert r.headers.get("Cache-Control") == "no-cache"
+
+
+@pytest.mark.integration
+def test_index_has_pwa_meta(client: TestClient) -> None:
+    """index.html の head に PWA 必須要素が揃う
+    (manifest link + iOS meta + theme-color + apple-touch-icon)."""
+    from favgallery.server import ASSET_VERSION
+
+    html = client.get("/").text
+    assert f'<link rel="manifest" href="/manifest.webmanifest?v={ASSET_VERSION}"' in html
+    assert '<meta name="apple-mobile-web-app-capable" content="yes"' in html
+    assert '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"' in html
+    assert '<meta name="apple-mobile-web-app-title" content="FavGallery"' in html
+    assert '<meta name="theme-color" content="#1d9bf0"' in html
+    assert (
+        f'<link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png?v={ASSET_VERSION}"'
+        in html
+    )
+
+
+@pytest.mark.integration
+def test_apple_touch_icon_served(client: TestClient) -> None:
+    """apple-touch-icon.png (iOS 専用・180x180 PNG) が配信される。"""
+    r = client.get("/static/icons/apple-touch-icon.png")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/png"
+
+
+@pytest.mark.integration
+def test_pwa_icons_long_cached(client: TestClient) -> None:
+    """icons/*.png は ?v= 付き参照なので style.css / lib/*.js と同じ immutable 長期キャッシュ。"""
+    r = client.get("/static/icons/icon-192.png")
+    assert r.status_code == 200
+    assert r.headers.get("Cache-Control") == "public, max-age=31536000, immutable"
+
+
+@pytest.mark.integration
+def test_pwa_icons_401_is_not_long_cached(
+    monkeypatch: pytest.MonkeyPatch, fake_library: Path
+) -> None:
+    """icons も 401 時は no-cache (style.css / lib/*.js と対称・1 年キャッシュ事故防止)。"""
+    monkeypatch.setenv("FAVGALLERY_USER", "u")
+    monkeypatch.setenv("FAVGALLERY_PASSWORD", "p")
+    app = create_app(library_root=fake_library, scan_in_background=False)
+    c = TestClient(app, raise_server_exceptions=False)
+    r = c.get("/static/icons/icon-192.png")
+    assert r.status_code == 401
+    assert r.headers.get("Cache-Control") == "no-cache"
+
+
+@pytest.mark.integration
+def test_asset_version_includes_manifest_and_icons(tmp_path: Path) -> None:
+    """_resolve_asset_version が manifest + icons も hash 集計対象に含む
+    (差し替えで ?v= が変わる = 自動キャッシュバスト)。"""
+    from favgallery.server import _resolve_asset_version
+
+    # baseline: style.css + lib/*.js + manifest + icons の構成を再現
+    static = tmp_path / "static"
+    (static / "lib").mkdir(parents=True)
+    (static / "icons").mkdir()
+    (static / "style.css").write_bytes(b"body{}")
+    (static / "lib" / "main.js").write_bytes(b"console.log(1)")
+    (static / "manifest.webmanifest").write_bytes(b'{"name":"X"}')
+    (static / "icons" / "icon-192.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 8)
+    v1 = _resolve_asset_version(static)
+
+    # icon を差し替えると hash が変わる
+    (static / "icons" / "icon-192.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\xff" * 8)
+    v2 = _resolve_asset_version(static)
+    assert v1 != v2
+
+    # manifest を差し替えても hash が変わる
+    (static / "manifest.webmanifest").write_bytes(b'{"name":"Y"}')
+    v3 = _resolve_asset_version(static)
+    assert v2 != v3
