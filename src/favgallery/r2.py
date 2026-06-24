@@ -101,6 +101,18 @@ class R2Client:
                 keys.add(obj["Key"])
         return keys
 
+    def generate_presigned_get_url(self, key: str, *, ttl_seconds: int = 600) -> str:
+        """Time-limited public URL for GET.
+
+        Used to send the browser to R2 directly (302 redirect) so the bytes
+        never traverse Railway. R2 → Cloudflare egress is free.
+        """
+        return self._client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self._bucket, "Key": key},
+            ExpiresIn=ttl_seconds,
+        )
+
     def stream_object(self, key: str) -> tuple[int, str, Iterator[bytes]]:
         """Stream an object from R2.
 

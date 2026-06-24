@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse
 
 from favgallery.context import AppContext, get_context
 from favgallery.thumbs import thumbnail_bytes, thumbnail_bytes_from_raw
@@ -27,13 +27,21 @@ async def api_media(
         )
     if ctx.r2_client is not None:
         try:
-            content_length, content_type, body_iter = ctx.r2_client.stream_object(rel_path)
-            headers = {"Cache-Control": ctx.immutable_cache, "ETag": etag}
-            if content_length:
-                headers["content-length"] = str(content_length)
-            return StreamingResponse(body_iter, media_type=content_type, headers=headers)
+            presigned = ctx.r2_client.generate_presigned_get_url(rel_path)
+            # `private` (not `public`) so Cloudflare's edge does NOT cache the
+            # 302 — otherwise expired presigned URLs would be served past their
+            # signature TTL. max-age=300 < signature TTL=600 so the browser
+            # re-fetches a fresh signed URL before the previous one expires.
+            return RedirectResponse(
+                url=presigned,
+                status_code=302,
+                headers={
+                    "Cache-Control": "private, max-age=300",
+                    "ETag": etag,
+                },
+            )
         except Exception:
-            # Fall through to local filesystem if key is absent in R2.
+            # Fall through to local filesystem if presigned issuance fails.
             pass
     target = (ctx.library_root / rel_path).resolve()
     if not target.is_file():
