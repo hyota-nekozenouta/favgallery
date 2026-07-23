@@ -26,6 +26,7 @@ from favgallery.paths import portable_root
 from favgallery.proxy import CdnProxy
 from favgallery.r2 import R2Client, r2_config_from_env
 from favgallery.routers import admin as admin_router
+from favgallery.routers import admin_mem as admin_mem_router
 from favgallery.routers import books as books_router
 from favgallery.routers import cookies as cookies_router
 from favgallery.routers import dedup as dedup_router
@@ -304,6 +305,14 @@ def create_app(
     scan_in_background: bool = True,
     r2_client: R2Client | None = None,
 ) -> FastAPI:
+    if os.environ.get("FAVGALLERY_TRACEMALLOC") == "1":
+        # Opt-in only — tracemalloc adds real overhead, so it stays off unless
+        # a memory-reduction investigation explicitly asks for it (see
+        # routers/admin_mem.py's tracemalloc_top).
+        import tracemalloc
+
+        tracemalloc.start()
+
     app = FastAPI(title="FavGallery", version=APP_VERSION)
     app.middleware("http")(_make_basic_auth_middleware())
 
@@ -476,6 +485,7 @@ def create_app(
 
     app.include_router(sync_router.router)
     app.include_router(admin_router.router)
+    app.include_router(admin_mem_router.router)
     app.include_router(dedup_router.router)
     app.include_router(lists_router.router)
     app.include_router(posts_router.router)
