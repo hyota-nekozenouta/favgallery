@@ -4,6 +4,8 @@
 export const state = {
   tab: 'likes',                      // 'likes' | 'timeline'
   layout: 'masonry',                 // 'masonry' | 'reel'
+  sort: 'new',                       // 'new'(新しい順・既定) | 'old'(古い順)  ※いいねタブのみ
+  density: 'md',                     // 'sm' | 'md'(既定) | 'lg'  表示サイズ(列数)
   authors: [],
   tags: [],
   lists: [],                          // [{id, name, count}]

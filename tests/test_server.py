@@ -237,6 +237,41 @@ def test_posts_endpoint_returns_paginated(client: TestClient) -> None:
 
 
 @pytest.mark.integration
+def test_posts_sort_old_reverses_default_order_and_preserves_pagination(
+    client: TestClient,
+) -> None:
+    default_page = client.get("/api/posts", params={"limit": 2, "offset": 0})
+    old_page = client.get("/api/posts", params={"sort": "old", "limit": 2, "offset": 0})
+    old_next_page = client.get(
+        "/api/posts", params={"sort": "old", "limit": 2, "offset": 2}
+    )
+    default_after_old = client.get("/api/posts", params={"limit": 2, "offset": 0})
+
+    assert (
+        default_page.status_code
+        == old_page.status_code
+        == old_next_page.status_code
+        == default_after_old.status_code
+        == 200
+    )
+    default_items = default_page.json()["items"]
+    old_items = old_page.json()["items"]
+    assert [item["tweet_id"] for item in old_items] == ["3001", "2001"]
+    assert [item["tweet_id"] for item in default_items] == ["1001", "1002"]
+    assert default_after_old.json()["items"] == default_items
+    assert old_page.json()["total"] == old_next_page.json()["total"] == 4
+    assert {item["tweet_id"] for item in old_items}.isdisjoint(
+        {item["tweet_id"] for item in old_next_page.json()["items"]}
+    )
+
+
+@pytest.mark.integration
+def test_posts_sort_rejects_unknown_value(client: TestClient) -> None:
+    r = client.get("/api/posts", params={"sort": "popular"})
+    assert r.status_code == 422
+
+
+@pytest.mark.integration
 def test_posts_filter_by_author(client: TestClient) -> None:
     r = client.get("/api/posts", params={"author": "alice"})
     data = r.json()

@@ -2,6 +2,8 @@
 // (Phase 4B: main.js から分離。state / dom / reader のみ依存のリーフ)
 import { state } from 'state';
 import { $, escapeHtml } from 'dom';
+import { showNotice } from 'notices';
+import { confirmDialog, promptDialog } from 'dialog';
 import { openReader } from 'reader';
 import { icon } from 'icons';
 
@@ -82,7 +84,10 @@ function renderBooks() {
   m.querySelectorAll('[data-del-book]').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (!confirm('この漫画を削除しますか？')) return;
+      const ok = await confirmDialog({
+        title: '漫画を削除しますか？', confirmLabel: '削除', danger: true,
+      });
+      if (!ok) return;
       await fetch(`/api/books/${btn.dataset.delBook}`, { method: 'DELETE' });
       await fetchBooks();
     });
@@ -113,11 +118,18 @@ function renderBooks() {
   });
 }
 
-function openTagEditor(bookId) {
+async function openTagEditor(bookId) {
   const book = state.books.find(b => b.id === bookId);
   if (!book) return;
   const currentTags = (book.tags || []).join(', ');
-  const input = prompt(`タグ編集（カンマ区切り）\n「${book.title}」`, currentTags);
+  const input = await promptDialog({
+    title: 'タグ編集',
+    message: `「${book.title}」`,
+    label: 'カンマ区切りで入力',
+    value: currentTags,
+    placeholder: '例: 作者名, ジャンル',
+    confirmLabel: '保存',
+  });
   if (input === null) return;
   const tags = input.split(',').map(t => t.trim()).filter(Boolean);
   fetch(`/api/books/${bookId}/tags`, {
@@ -243,8 +255,8 @@ function openBookUpload() {
 async function submitBook() {
   const title = document.getElementById('bookTitle').value.trim();
   const fileInput = document.getElementById('bookFiles');
-  if (!title) { alert('タイトルを入力してください'); return; }
-  if (!fileInput.files.length) { alert('ファイルを選択してください'); return; }
+  if (!title) { showNotice('タイトルを入力してください', { kind: 'error' }); return; }
+  if (!fileInput.files.length) { showNotice('ファイルを選択してください', { kind: 'error' }); return; }
 
   const form = new FormData();
   form.append('title', title);
@@ -255,16 +267,16 @@ async function submitBook() {
 
   try {
     const r = await fetch('/api/books', { method: 'POST', body: form });
-    if (!r.ok) { const e = await r.json(); alert(e.detail || 'エラー'); return; }
+    if (!r.ok) { const e = await r.json().catch(() => ({})); showNotice(e.detail || 'エラー', { kind: 'error' }); return; }
     const data = await r.json().catch(() => ({}));
     document.getElementById('bookUploadModal')?.remove();
     if (data.skipped) {
-      alert('既存の本と重複していたため追加しませんでした' + (data.matched_title ? '：' + data.matched_title : ''));
+      showNotice('既存の本と重複していたため追加しませんでした' + (data.matched_title ? '：' + data.matched_title : ''), { kind: 'info' });
       return;
     }
     await fetchBooks();
   } catch (e) {
-    alert('アップロード失敗: ' + e.message);
+    showNotice('アップロード失敗: ' + e.message, { kind: 'error' });
   }
 }
 
@@ -282,11 +294,11 @@ async function addUrlToQueue() {
     });
     if (!r.ok) {
       const e = await r.json().catch(() => ({}));
-      alert(String(e.detail || e.reason || 'エラー'));
+      showNotice(String(e.detail || e.reason || 'エラー'), { kind: 'error' });
       return;
     }
   } catch (e) {
-    alert('リクエスト失敗: ' + e.message);
+    showNotice('リクエスト失敗: ' + e.message, { kind: 'error' });
     return;
   }
 

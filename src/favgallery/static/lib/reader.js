@@ -31,6 +31,8 @@ export async function openReader(bookId) {
   const modal = document.getElementById('readerModal');
   modal.classList.remove('hidden');
   modal.classList.add('flex');
+  const strip = document.getElementById('readerStrip');
+  if (strip) { strip.classList.add('hidden'); strip.innerHTML = ''; }  // 開くまで作らない(遅延生成)
   paintPanes();              // also recenters the track
   prefetchPageImages(0, 3, 1);
 }
@@ -39,8 +41,71 @@ export function closeReader() {
   const modal = document.getElementById('readerModal');
   modal.classList.add('hidden');
   modal.classList.remove('flex');
+  const strip = document.getElementById('readerStrip');
+  if (strip) { strip.classList.add('hidden'); strip.innerHTML = ''; }
   _readerResetTrack();
   _prefetchCache.clear();
+}
+
+// --- ページ一覧 (サムネ列) + 任意ページへジャンプ -------------------------
+// 任意ページへ移動。3ペインを再描画し周辺をプリフェッチ。ページ番号表示も同期。
+export function jumpToPage(n) {
+  const { pages } = state.reader;
+  if (!pages || !pages.length) return;
+  const target = Math.max(0, Math.min(pages.length - 1, n));
+  const prev = state.reader.pos;
+  state.reader.pos = target;
+  paintPanes();
+  if (target !== prev) prefetchPageImages(target, 3, target >= prev ? 1 : -1);
+  _highlightStrip();
+}
+
+// 全ページのサムネを RTL(右→左) で並べる。src はプロパティ代入で安全に(injection 回避)。
+// 初回展開時にだけ生成する(長い漫画で開くたびの一括生成を避ける)。
+function buildStrip() {
+  const strip = document.getElementById('readerStrip');
+  if (!strip) return;
+  strip.innerHTML = '';
+  const { pages } = state.reader;
+  const frag = document.createDocumentFragment();
+  pages.forEach((pg, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'reader-thumb';
+    btn.dataset.page = String(i);
+    btn.title = `${i + 1} / ${pages.length}`;
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.alt = '';
+    img.src = `/thumb/${pg.rel_path}?size=120`;
+    const num = document.createElement('span');
+    num.className = 'reader-thumb-num';
+    num.textContent = String(i + 1);
+    btn.append(img, num);
+    btn.addEventListener('click', () => jumpToPage(i));
+    frag.appendChild(btn);
+  });
+  strip.appendChild(frag);
+}
+
+function _highlightStrip() {
+  const strip = document.getElementById('readerStrip');
+  if (!strip) return;
+  const visible = !strip.classList.contains('hidden');
+  strip.querySelectorAll('.reader-thumb').forEach((b) => {
+    const active = parseInt(b.dataset.page, 10) === state.reader.pos;
+    b.classList.toggle('active', active);
+    if (active && visible) b.scrollIntoView({ block: 'nearest', inline: 'center' });
+  });
+}
+
+function toggleStrip() {
+  const strip = document.getElementById('readerStrip');
+  if (!strip) return;
+  if (!strip.children.length) buildStrip();   // 初回展開時に遅延生成
+  const nowHidden = strip.classList.toggle('hidden');
+  if (!nowHidden) _highlightStrip();   // 開いたとき現在ページを中央へ
 }
 
 // --- Reader slide track ---------------------------------------------------
@@ -83,6 +148,7 @@ function readerGo(delta) {
   state.reader.pos = Math.max(0, Math.min(n - 1, prev + delta));
   paintPanes();
   if (state.reader.pos !== prev) prefetchPageImages(state.reader.pos, 3, delta >= 0 ? 1 : -1);
+  _highlightStrip();
 }
 
 // Reader keyboard — RTL: ArrowLeft = next, ArrowRight = prev (manga). Flip for LTR.
@@ -182,3 +248,5 @@ document.addEventListener('keydown', (e) => {
 
 // onclick=closeReader() の module 化代替 (Phase 4 / module scope はグローバル非公開)
 document.getElementById('readerCloseBtn')?.addEventListener('click', () => closeReader());
+// ページ一覧トグル
+document.getElementById('readerThumbsBtn')?.addEventListener('click', () => toggleStrip());

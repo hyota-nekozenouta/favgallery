@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
@@ -50,6 +51,7 @@ def api_posts(
     media_type: str | None = None,
     q: str | None = None,
     list_id: int | None = Query(default=None, alias="list"),
+    sort: Literal["new", "old"] = Query(default="new"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     ctx: AppContext = Depends(get_context),
@@ -59,6 +61,8 @@ def api_posts(
     if list_id is not None:
         keys = ctx.db.posts_in_list(list_id)
         filtered = [p for p in filtered if (p.tweet_id, p.num) in keys]
+    if sort == "old":
+        filtered = list(reversed(filtered))
     total = len(filtered)
     page = filtered[offset : offset + limit]
     listed_keys = ctx.get_listed_keys()

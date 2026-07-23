@@ -11,6 +11,8 @@ export function showNotice(message, { kind = 'info', sticky = false, onClick = n
   const el = document.createElement('div');
   el.id = 'appNotice';
   el.className = 'app-toast' + (kind === 'error' ? ' toast-error' : '');
+  el.setAttribute('role', 'status');
+  el.setAttribute('aria-live', kind === 'error' ? 'assertive' : 'polite');
   const icon = document.createElement('span');
   icon.className = 'toast-icon';
   icon.textContent = kind === 'error' ? '⚠' : '✦';

@@ -6,7 +6,7 @@ import { $, $$ } from 'dom';
 import { showNotice } from 'notices';
 import { closeReader } from 'reader';
 import { fetchBooks, loadBookTags } from 'bookshelf';
-import { fetchPosts, loadMoreUnliked, exitUnlikedMode } from 'posts';
+import { fetchPosts, loadMoreUnliked, exitUnlikedMode, setDensity } from 'posts';
 import { loadLibrary, loadLists, loadFavoriteAuthors, renderFilterChips } from 'library';
 import { loadLastSeen, setupSeenObserver } from 'timeline';
 import { pollSync } from 'sync';
@@ -26,6 +26,12 @@ function switchTab(tab) {
   $('#sidebarPosts').classList.toggle('hidden', tab === 'bookshelf');
   $('#sidebarBooks').classList.toggle('hidden', tab !== 'bookshelf');
   $('#sidebarPostsHeader').classList.toggle('hidden', tab === 'bookshelf');
+  // 並び替え/表示サイズは「いいね」タブ専用に表示する。
+  // ・並び替え: /api/posts(いいね) にしか効かない。
+  // ・表示サイズ: timeline で reflow すると「ここまで見た」線が消える既存挙動を踏むため、
+  //   いいねタブ限定にして回避（timeline はリサイズ以外で列を組み直さない）。
+  $('#sortSelect')?.classList.toggle('hidden', tab !== 'likes');
+  $('#densitySelect')?.classList.toggle('hidden', tab !== 'likes');
   exitUnlikedMode();
   state.offset = 0; state.posts = []; state.dividerInserted = false;
   setupSeenObserver();          // turn observer on for timeline, off otherwise
@@ -63,6 +69,33 @@ window.addEventListener('resize', () => {
 $('#layoutToggle').addEventListener('click', () => {
   setLayout(state.layout === 'masonry' ? 'reel' : 'masonry');
 });
+
+// --- 並び替え / 表示サイズ (localStorage 記憶) --------------------------
+(function initSortDensity() {
+  let savedSort = 'new', savedDensity = 'md';
+  try {
+    savedSort = localStorage.getItem('fg_sort') || 'new';
+    savedDensity = localStorage.getItem('fg_density') || 'md';
+  } catch { /* private mode */ }
+  if (savedSort === 'old') state.sort = 'old';
+  if (['sm', 'md', 'lg'].includes(savedDensity)) state.density = savedDensity;
+
+  const sortSel = $('#sortSelect');
+  const densitySel = $('#densitySelect');
+  if (sortSel) {
+    sortSel.value = state.sort;
+    sortSel.addEventListener('change', () => {
+      state.sort = sortSel.value === 'old' ? 'old' : 'new';
+      try { localStorage.setItem('fg_sort', state.sort); } catch { /* private mode */ }
+      state.offset = 0; state.posts = [];
+      fetchPosts();
+    });
+  }
+  if (densitySel) {
+    densitySel.value = state.density;
+    densitySel.addEventListener('change', () => setDensity(densitySel.value));
+  }
+})();
 
 // --- Search / media-type chips -------------------------------------
 let searchTimer = null;
@@ -151,6 +184,7 @@ document.addEventListener('keydown', (e) => {
 // 呼び出し箇所に依存しないよう MutationObserver で物理監視 (open/close 漏れゼロ)
 function syncScrollLock() {
   const locked = !!(document.getElementById('cookieModal')
+    || document.getElementById('appDialog')
     || document.getElementById('bookUploadModal')
     || (document.getElementById('readerModal') && !document.getElementById('readerModal').classList.contains('hidden'))
     || (document.getElementById('lightbox') && !document.getElementById('lightbox').classList.contains('hidden'))
@@ -163,3 +197,16 @@ for (const id of ['app-sidebar', 'readerModal', 'lightbox']) {
   const n = document.getElementById(id);
   if (n) _lockWatch.observe(n, { attributes: true, attributeFilter: ['class'] });
 }
+
+// --- 画像フェードイン (Phase B) -----------------------------------------
+// load イベントはバブルしないが capture フェーズなら document で捕まえられる。
+// タイル画像とライトボックス画像だけを対象に .loaded を付け、CSS で opacity 0→1。
+// error 時も .loaded を付けて「壊れた画像が永久に透明」になるのを防ぐ。
+function _markImgLoaded(e) {
+  const t = e.target;
+  if (t && t.tagName === 'IMG' && (t.closest('.tile') || t.closest('#lbMedia'))) {
+    t.classList.add('loaded');
+  }
+}
+document.addEventListener('load', _markImgLoaded, true);
+document.addEventListener('error', _markImgLoaded, true);

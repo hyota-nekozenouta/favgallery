@@ -4,6 +4,7 @@
 import { state } from 'state';
 import { $, $$, escapeHtml } from 'dom';
 import { showNotice } from 'notices';
+import { confirmDialog } from 'dialog';
 import { renderAuthorHeader } from 'library';
 import { openLightbox, renderLightbox } from 'lightbox';
 import { openListPopover } from 'popovers';
@@ -21,11 +22,13 @@ const DEFAULT_ASPECT = 1.25;          // メタ欠損時のフォールバック
 const VIDEO_DEFAULT_ASPECT = 9 / 16;  // 動画メタ欠損時（横長想定）
 
 // CSS の column-count ブレークポイント (768/1024/1700) を JS にミラー。
+// 表示サイズ(density)で列数を増減: 大=列を減らし画像大 / 小=列を増やし画像小。
+const DENSITY_DELTA = { lg: -1, md: 0, sm: 1 };
 function _currentColCount() {
   const w = window.innerWidth;
-  if (w >= 1700) return 4;
-  if (w >= 1024) return 3;
-  return 2;
+  const base = w >= 1700 ? 4 : w >= 1024 ? 3 : 2;
+  const delta = DENSITY_DELTA[state.density] || 0;
+  return Math.max(1, base + delta);
 }
 
 // 列幅は CSS(flex:1) 任せなので絶対 px は不要。全列同幅ゆえアスペクト比(高さ/幅)を
@@ -89,10 +92,10 @@ function _reindexAfterRemoval(removedIdx) {
 // 起因なので既存が動いてよい）。既存ノードを appendChild で「移動」するだけなので
 // 画像は再ロードされず bind/observer も保たれる。
 let _resizeTimer = null;
-function _reflowColumns() {
+function _reflowColumns(force = false) {
   if (!_cols.length) return;
   const want = _currentColCount();
-  if (want === _colCount) return;
+  if (!force && want === _colCount) return;
   // data-idx 昇順で論理順を復元してから配置（DOM 順は列ごとで論理順と一致しない）。
   const tiles = $$('#masonry .tile').sort(
     (a, b) => parseInt(a.dataset.idx, 10) - parseInt(b.dataset.idx, 10)
@@ -103,6 +106,17 @@ function _reflowColumns() {
     col.el.appendChild(el);
     const p = state.posts[parseInt(el.dataset.idx, 10)];
     if (p) col.h += _estTileHeight(p);
+  }
+}
+
+// 表示サイズ切替: state.density を更新し保存、マソンリー表示中なら即座に再配置。
+// （画像は appendChild で移動するだけなので再ロードなし）
+export function setDensity(mode) {
+  if (!Object.hasOwn(DENSITY_DELTA, mode)) return;
+  state.density = mode;
+  try { localStorage.setItem('fg_density', mode); } catch { /* private mode */ }
+  if (state.layout === 'masonry' && state.tab !== 'bookshelf' && !state.unliked.active) {
+    _reflowColumns(true);
   }
 }
 window.addEventListener('resize', () => {
@@ -314,6 +328,7 @@ export async function fetchPosts() {
     if (state.filter.media_type) params.set('media_type', state.filter.media_type);
     if (state.filter.q) params.set('q', state.filter.q);
     if (state.filter.list_id) params.set('list', state.filter.list_id);
+    if (state.sort && state.sort !== 'new') params.set('sort', state.sort);  // 既定(new)は送らず現状のURLを維持
     params.set('limit', state.limit); params.set('offset', state.offset);
   }
   // 初回 / フィルタ変更直後 (グリッドが空) はスケルトンを敷いて体感を埋める
@@ -482,10 +497,15 @@ function _bindTiles(tiles) {
 export async function deletePost(idx, tileEl) {
   const p = state.posts[idx];
   if (!p) return;
-  if (!confirm(`この画像を削除しますか？\n@${p.author_name} / ${p.tweet_id}\n\n次回の同期でも再ダウンロードされません。`)) return;
+  const ok = await confirmDialog({
+    title: '画像を削除しますか？',
+    message: `@${p.author_name} / ${p.tweet_id}\n\n次回の同期でも再ダウンロードされません。`,
+    confirmLabel: '削除', danger: true,
+  });
+  if (!ok) return;
   const r = await fetch(`/api/posts/${encodeURIComponent(p.tweet_id)}/${p.num}`, { method: 'DELETE' });
   if (!r.ok) {
-    alert('削除に失敗しました: ' + r.status);
+    showNotice('削除に失敗しました: ' + r.status, { kind: 'error' });
     return;
   }
   // Remove from in-memory list and from the DOM, keep scroll position.

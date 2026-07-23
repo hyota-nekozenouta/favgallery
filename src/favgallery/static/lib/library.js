@@ -3,6 +3,7 @@
 import { state } from 'state';
 import { $, $$, escapeHtml } from 'dom';
 import { showNotice } from 'notices';
+import { confirmDialog, promptDialog } from 'dialog';
 import { fetchPosts, enterUnlikedMode, exitUnlikedMode } from 'posts';
 import { icon } from 'icons';
 
@@ -188,7 +189,12 @@ export function renderListSidebar() {
     const id = parseInt(b.dataset.listId, 10);
     const l = state.lists.find(x => x.id === id);
     if (!l) return;
-    if (!confirm(`リスト「${l.name}」を削除しますか？`)) return;
+    const ok = await confirmDialog({
+      title: 'リストを削除しますか？',
+      message: `「${l.name}」`,
+      confirmLabel: '削除', danger: true,
+    });
+    if (!ok) return;
     await fetch(`/api/lists/${id}`, { method: 'DELETE' });
     if (state.filter.list_id === id) {
       state.filter.list_id = null;
@@ -201,13 +207,15 @@ export function renderListSidebar() {
 }
 
 $('#newListBtn').addEventListener('click', async () => {
-  const name = prompt('リスト名:');
-  if (!name) return;
+  const name = await promptDialog({
+    title: '新しいリスト', label: 'リスト名', placeholder: 'リスト名', confirmLabel: '作成',
+  });
+  if (!name || !name.trim()) return;
   const r = await fetch('/api/lists', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name: name.trim() }),
   });
-  if (!r.ok) { alert('作成失敗 (同名のリストが既にある可能性)'); return; }
+  if (!r.ok) { showNotice('作成失敗 (同名のリストが既にある可能性)', { kind: 'error' }); return; }
   await loadLists();
 });
 
