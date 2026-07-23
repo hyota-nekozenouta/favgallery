@@ -6,6 +6,11 @@
 
 const HOST_ID = 'appDialog';
 
+// 現在開いているダイアログの「キャンセル」ハンドラ。Android戻るボタン等から
+// cancelActiveDialog() で発火して Promise を確実に解決させる（要素を消すだけだと
+// await が永久に残るため）。ダイアログは同時に1つ（openDialog が既存を除去する）。
+let _activeCancel = null;
+
 function openDialog(opts) {
   return new Promise((resolve) => {
     document.getElementById(HOST_ID)?.remove();
@@ -75,11 +80,13 @@ function openDialog(opts) {
     function settle(val) {
       if (done) return;
       done = true;
+      _activeCancel = null;
       cleanup();
       resolve(val);
     }
     const onCancel = () => settle(opts.withInput ? null : false);
     const onConfirm = () => settle(opts.withInput ? (input ? input.value : '') : true);
+    _activeCancel = onCancel;   // 戻るボタン等からの強制キャンセル用
 
     cancelBtn.addEventListener('click', onCancel);
     okBtn.addEventListener('click', onConfirm);
@@ -111,6 +118,13 @@ function openDialog(opts) {
     (input || okBtn).focus();
     if (input) input.select();
   });
+}
+
+// 開いているダイアログがあれば「キャンセル」として閉じる（Promiseを解決）。無ければ false。
+// Android の戻るボタンハンドラ（main.js）から使う。
+export function cancelActiveDialog() {
+  if (_activeCancel) { _activeCancel(); return true; }
+  return false;
 }
 
 // 確認ダイアログ。OK で true / キャンセル・Esc・背面クリックで false を返す。

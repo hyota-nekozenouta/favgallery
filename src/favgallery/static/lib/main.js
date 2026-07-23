@@ -4,7 +4,10 @@
 import { state } from 'state';
 import { $, $$ } from 'dom';
 import { showNotice } from 'notices';
+import { cancelActiveDialog } from 'dialog';
 import { closeReader } from 'reader';
+import { closeLightbox } from 'lightbox';
+import { closeListPopover } from 'popovers';
 import { fetchBooks, loadBookTags } from 'bookshelf';
 import { fetchPosts, loadMoreUnliked, exitUnlikedMode, setDensity } from 'posts';
 import { loadLibrary, loadLists, loadFavoriteAuthors, renderFilterChips } from 'library';
@@ -116,12 +119,15 @@ $$('.mt-btn').forEach(b => b.addEventListener('click', () => {
 }));
 
 // --- モバイルサイドバー制御 ----------------------------------------
+// closeSidebar は戻るボタンハンドラ(closeTopmostLayer)からも呼ぶためモジュール scope に公開。
+let _closeSidebar = () => {};
 (function() {
   const sidebar   = document.getElementById('app-sidebar');
   const overlay   = document.getElementById('sidebar-overlay');
   const hamburger = document.getElementById('hamburger-btn');
   function openSidebar()  { sidebar.classList.add('open');    overlay.classList.add('active'); }
   function closeSidebar() { sidebar.classList.remove('open'); overlay.classList.remove('active'); }
+  _closeSidebar = closeSidebar;
   hamburger.addEventListener('click', () =>
     sidebar.classList.contains('open') ? closeSidebar() : openSidebar()
   );
@@ -191,12 +197,89 @@ function syncScrollLock() {
     || (document.getElementById('app-sidebar') && document.getElementById('app-sidebar').classList.contains('open')));
   document.body.classList.toggle('scroll-locked', locked);
 }
-const _lockWatch = new MutationObserver(syncScrollLock);
+// スクロールロックと「戻るボタンのガード」を、オーバーレイの開閉に合わせて一括再同期。
+const _lockWatch = new MutationObserver(() => { syncScrollLock(); reconcileGuard(); });
 _lockWatch.observe(document.body, { childList: true });
-for (const id of ['app-sidebar', 'readerModal', 'lightbox']) {
+for (const id of ['app-sidebar', 'readerModal', 'lightbox', 'listPopover', 'optionsPopover', 'readerStrip']) {
   const n = document.getElementById(id);
   if (n) _lockWatch.observe(n, { attributes: true, attributeFilter: ['class'] });
 }
+
+// --- Android 戻るボタンで「最前面のオーバーレイを1つだけ閉じる」 -------------
+// 方式: 何か開いている間だけダミー履歴(ガード)を1つ積む。端末の戻る=popstate で
+// 最前面を1つ閉じ、まだ開いていれば積み直す。全部閉じたら通常のページ戻り。
+// プログラム操作(ボタン/Esc)で全部閉じたら、ぶら下がったガードを自前で回収する。
+// 既存の history 利用は皆無なので衝突なし。既存の Esc 連鎖・各閉じ処理は不変。
+let _navArmed = false;   // ガード(ダミー履歴)を積んでいるか
+let _selfPop = false;    // 自前 history.back() による popstate を無視するフラグ
+
+function _shown(id) {   // 要素が存在し hidden でない
+  const el = document.getElementById(id);
+  return !!(el && !el.classList.contains('hidden'));
+}
+function _present(id) { return !!document.getElementById(id); }   // 動的生成モーダルは存在=開
+function _sidebarOpen() {
+  const el = document.getElementById('app-sidebar');
+  return !!(el && el.classList.contains('open'));
+}
+function _readerStripOpen() {
+  return _shown('readerModal') && _shown('readerStrip');
+}
+
+// いま「戻るで閉じられる」オーバーレイが1つでも開いているか。
+function anyOverlayOpen() {
+  return _present('appDialog') || _present('bookUploadModal') || _present('cookieModal')
+    || _shown('readerModal') || _shown('lightbox') || _shown('listPopover')
+    || _shown('optionsPopover') || _sidebarOpen();
+}
+
+// 最前面の1層だけ閉じる。閉じたら true、何も開いていなければ false。優先順=最前面から。
+function closeTopmostLayer() {
+  // 優先順は最前面(z-index高)から。appDialog(9990) は他モーダルの上に重なり得る。
+  // cookieModal(z-[70]) / bookUploadModal(z-50) は現状の導線で同時オープンしない前提だが、
+  // 仮に共存しても最前面を先に閉じるよう z 順に並べておく。
+  if (_present('appDialog')) { cancelActiveDialog(); return true; }
+  if (_present('cookieModal')) {
+    const c = document.getElementById('cookieCloseBtn');
+    if (c) c.click(); else document.getElementById('cookieModal').remove();
+    return true;
+  }
+  if (_present('bookUploadModal')) {
+    const b = document.getElementById('bookCancelBtn');
+    if (b) b.click(); else document.getElementById('bookUploadModal').remove();
+    return true;
+  }
+  if (_readerStripOpen()) { document.getElementById('readerStrip').classList.add('hidden'); return true; }
+  if (_shown('readerModal')) { closeReader(); return true; }
+  if (_shown('lightbox')) { closeLightbox(); return true; }
+  if (_shown('listPopover')) { closeListPopover(); return true; }
+  if (_shown('optionsPopover')) { document.getElementById('optionsPopover').classList.add('hidden'); return true; }
+  if (_sidebarOpen()) { _closeSidebar(); return true; }
+  return false;
+}
+
+// ガード(ダミー履歴)を開閉状態に同期。べき等 (popstate と observer から重複で呼ばれても安全)。
+function reconcileGuard() {
+  const open = anyOverlayOpen();
+  if (open && !_navArmed) {
+    // push 成功後にのみ armed にする。pushState はブラウザのレート制限で throw し得るため、
+    // 先にフラグを立てると「ガード未積載なのに armed」になり、後で history.back() が実ページ
+    // 履歴を消費してユーザーをアプリ外へ飛ばす。順序でこの desync を防ぐ。
+    history.pushState({ fgGuard: 1 }, '');
+    _navArmed = true;
+  } else if (!open && _navArmed) {
+    _navArmed = false;
+    _selfPop = true;      // これから起こす back の popstate は無視する
+    history.back();       // ぶら下がったガードを1つ回収
+  }
+}
+
+window.addEventListener('popstate', () => {
+  if (_selfPop) { _selfPop = false; return; }   // 自前 back を無視
+  _navArmed = false;         // この pop でガードは消費された
+  closeTopmostLayer();       // 最前面を1つ閉じる（無ければ何もしない=通常のページ戻り）
+  reconcileGuard();          // まだ開いていれば積み直す
+});
 
 // --- 画像フェードイン (Phase B) -----------------------------------------
 // load イベントはバブルしないが capture フェーズなら document で捕まえられる。
