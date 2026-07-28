@@ -30,11 +30,15 @@ def _base_payload(
     sensitive: bool,
     lang: str,
     hashtags: tuple[str, ...],
+    favorite_keys: set[tuple[str, int]] | None = None,
     extra: dict | None = None,
 ) -> dict:
     payload = {
         "tweet_id": tweet_id,
         "num": num,
+        # 常に含める。欠けていると UI が「未登録」と誤認し、★タップで既存の
+        # お気に入りを消してしまう (2026-07-28 の回帰を防ぐための不変条件)。
+        "is_favorite": (tweet_id, num) in favorite_keys if favorite_keys else False,
         "media_url": media_url,
         "thumb_url": thumb_url,
         "media_type": media_type,
@@ -57,8 +61,9 @@ def _base_payload(
     return payload
 
 
-def _post_payload(p: Post) -> dict:
+def _post_payload(p: Post, favorite_keys: set[tuple[str, int]] | None = None) -> dict:
     return _base_payload(
+        favorite_keys=favorite_keys,
         tweet_id=p.tweet_id,
         num=p.num,
         media_url=f"/api/media/{p.rel_media}",
@@ -79,8 +84,11 @@ def _post_payload(p: Post) -> dict:
     )
 
 
-def _timeline_payload(p: TimelinePost) -> dict:
+def _timeline_payload(
+    p: TimelinePost, favorite_keys: set[tuple[str, int]] | None = None
+) -> dict:
     return _base_payload(
+        favorite_keys=favorite_keys,
         tweet_id=p.tweet_id,
         num=p.num,
         media_url=f"/api/timeline/proxy?url={p.media_url}",

@@ -3,7 +3,7 @@
 import { state } from 'state';
 import { $, escapeHtml } from 'dom';
 import { showNotice } from 'notices';
-import { confirmDialog, promptDialog } from 'dialog';
+import { promptDialog } from 'dialog';
 import { openReader } from 'reader';
 import { icon } from 'icons';
 
@@ -42,6 +42,14 @@ export async function fetchBooks() {
   renderBooks();
 }
 
+// リーダー内で漫画を削除したときの再取得。reader.js を import すると循環参照に
+// なるため（bookshelf → reader は既にある）、カスタムイベントで一方向に受ける。
+document.addEventListener('fg:books-changed', () => {
+  if (state.tab !== 'bookshelf') return;
+  fetchBooks();
+  loadBookTags();
+});
+
 function renderBooks() {
   const m = $('#masonry');
   const addBtn = `<div class="tile cursor-pointer flex items-center justify-center border-2 border-dashed border-zinc-700 hover:border-indigo-500 rounded-lg" style="min-height:200px" id="bookAddTile">
@@ -61,11 +69,10 @@ function renderBooks() {
 
   const tiles = filtered.map(b => {
     const cover = b.cover_path ? `/thumb/${b.cover_path}?size=400` : '';
-    const favClass = b.is_favorite ? 'text-yellow-400' : 'text-zinc-600 hover:text-yellow-400';
+    // 削除は本を開いた時（リーダー）だけ。一覧のタイルには出さない。
     return `<div class="tile cursor-pointer" data-book-id="${b.id}">
       ${cover ? `<img data-cover="${cover}" loading="lazy" decoding="async" alt="" />` : '<div class="bg-zinc-800 w-full" style="min-height:200px"></div>'}
-      <button class="del-btn" data-del-book="${b.id}" title="削除">🗑</button>
-      <button class="fav-btn ${favClass}" data-fav-book="${b.id}" title="お気に入り" aria-label="お気に入り">${icon('heart')}</button>
+      <button class="fav-btn${b.is_favorite ? ' is-fav' : ''}" data-fav-book="${b.id}" title="お気に入り" aria-label="お気に入り">${icon('star')}</button>
       <div class="info" style="opacity:1;position:relative;padding:8px 10px;background:rgba(0,0,0,.7)">
         <div class="truncate font-medium">${escapeHtml(b.title)}</div>
         <div class="text-zinc-400 text-xs">${b.page_count} ページ</div>
@@ -79,19 +86,6 @@ function renderBooks() {
 
   // Add button click
   document.getElementById('bookAddTile')?.addEventListener('click', openBookUpload);
-
-  // Delete buttons
-  m.querySelectorAll('[data-del-book]').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const ok = await confirmDialog({
-        title: '漫画を削除しますか？', confirmLabel: '削除', danger: true,
-      });
-      if (!ok) return;
-      await fetch(`/api/books/${btn.dataset.delBook}`, { method: 'DELETE' });
-      await fetchBooks();
-    });
-  });
 
   // Favorite buttons
   m.querySelectorAll('[data-fav-book]').forEach(btn => {

@@ -30,7 +30,6 @@ from favgallery.routers import admin_mem as admin_mem_router
 from favgallery.routers import books as books_router
 from favgallery.routers import cookies as cookies_router
 from favgallery.routers import dedup as dedup_router
-from favgallery.routers import lists as lists_router
 from favgallery.routers import me as me_router
 from favgallery.routers import media as media_router
 from favgallery.routers import posts as posts_router
@@ -487,7 +486,6 @@ def create_app(
     app.include_router(admin_router.router)
     app.include_router(admin_mem_router.router)
     app.include_router(dedup_router.router)
-    app.include_router(lists_router.router)
     app.include_router(posts_router.router)
     app.include_router(media_router.router)
     app.include_router(timeline_router.router)

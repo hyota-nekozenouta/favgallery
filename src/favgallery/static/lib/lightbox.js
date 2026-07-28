@@ -1,10 +1,9 @@
-// ライトボックス: 同一ツイートのメディア群を切替表示 + メタ情報 + いいね/削除/リスト操作。
-// (Phase 4B: main.js から分離。posts/library/popovers と相互参照 — ES module 循環 import)
+// ライトボックス: 同一ツイートのメディア群を切替表示 + メタ情報 + いいね/削除/お気に入り。
+// (Phase 4B: main.js から分離。posts/library と相互参照 — ES module 循環 import)
 import { state } from 'state';
 import { $, $$, escapeHtml } from 'dom';
 import { markActiveAuthor, renderTags, renderFilterChips } from 'library';
-import { fetchPosts, deletePost, markLikedEverywhere } from 'posts';
-import { openListPopover, closeListPopover } from 'popovers';
+import { fetchPosts, deletePost, markLikedEverywhere, toggleFavoritePost } from 'posts';
 import { icon } from 'icons';
 
 // state.lb.items holds every post sharing the same tweet_id (sorted by num).
@@ -63,10 +62,10 @@ export function renderLightbox() {
   const lbActionBtn = showLikeBtn
     ? `<button id="lbLikeBtn" class="inline-flex items-center gap-1 bg-rose-600 hover:bg-rose-500 text-white text-sm rounded px-3 py-1">${icon('heart')} いいね & 保存</button>`
     : `<button id="lbDelBtn" class="bg-red-700 hover:bg-red-600 text-white text-sm rounded px-3 py-1">🗑 削除</button>`;
-  // List membership only makes sense for posts already in the local archive.
+  // お気に入りは手元のアーカイブにある投稿にだけ意味がある（未いいねビューは除外）。
   const lbAddBtn = fromUnliked
     ? ''
-    : `<button id="lbAddBtn" class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded px-3 py-1">+ リスト</button>`;
+    : `<button id="lbFavBtn" class="lb-fav-btn${p.is_favorite ? ' is-fav' : ''}" title="お気に入り">${icon('star')} <span>お気に入り</span></button>`;
   $('#lbMeta').innerHTML = `
     <div class="flex items-center justify-between mb-2">
       <div class="flex items-center gap-3">
@@ -100,11 +99,10 @@ export function renderLightbox() {
     state.offset = 0; state.posts = [];
     markActiveAuthor(); renderFilterChips(); fetchPosts();
   }));
-  const lbAdd = $('#lbAddBtn');
-  if (lbAdd) lbAdd.addEventListener('click', (e) => {
+  const lbFav = $('#lbFavBtn');
+  if (lbFav) lbFav.addEventListener('click', async (e) => {
     e.stopPropagation();
-    if (state.lb.gridIdx < 0) return;
-    openListPopover(state.lb.gridIdx, lbAdd);
+    await toggleFavoritePost(state.lb.items[state.lb.pos], lbFav);
   });
   const lbDel = $('#lbDelBtn');
   if (lbDel) lbDel.addEventListener('click', async (e) => {
@@ -169,7 +167,7 @@ $('#lbPrev').addEventListener('click', (e) => { e.stopPropagation(); lbGo(-1); }
 $('#lbNext').addEventListener('click', (e) => { e.stopPropagation(); lbGo(+1); });
 $('#lightbox').addEventListener('click', (e) => { if (e.target.id === 'lightbox') closeLightbox(); });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { closeLightbox(); closeListPopover(); return; }
+  if (e.key === 'Escape') { closeLightbox(); return; }
   if ($('#lightbox').classList.contains('hidden')) return;
   if (e.key === 'ArrowLeft')  { e.preventDefault(); lbGo(-1); }
   if (e.key === 'ArrowRight') { e.preventDefault(); lbGo(+1); }

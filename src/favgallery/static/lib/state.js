@@ -8,8 +8,7 @@ export const state = {
   density: 'md',                     // 'sm' | 'md'(既定) | 'lg'  表示サイズ(列数)
   authors: [],
   tags: [],
-  lists: [],                          // [{id, name, count}]
-  filter: { author: null, tag: null, media_type: '', q: '', list_id: null },
+  filter: { author: null, tag: null, media_type: '', q: '', favorite: false },
   hideLiked: true,
   posts: [],
   total: 0,

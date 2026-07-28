@@ -50,7 +50,7 @@ def api_posts(
     tag: str | None = None,
     media_type: str | None = None,
     q: str | None = None,
-    list_id: int | None = Query(default=None, alias="list"),
+    favorite: int = Query(default=0),
     sort: Literal["new", "old"] = Query(default="new"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
@@ -58,17 +58,15 @@ def api_posts(
 ) -> JSONResponse:
     idx = ctx.get_index()
     filtered = idx.filter(author=author, tag=tag, media_type=media_type, query=q)
-    if list_id is not None:
-        keys = ctx.db.posts_in_list(list_id)
+    if favorite:
+        keys = ctx.get_favorite_keys()
         filtered = [p for p in filtered if (p.tweet_id, p.num) in keys]
     if sort == "old":
         filtered = list(reversed(filtered))
     total = len(filtered)
     page = filtered[offset : offset + limit]
-    listed_keys = ctx.get_listed_keys()
-    items = [_post_payload(p) for p in page]
-    for item, p in zip(items, page, strict=False):
-        item["in_any_list"] = (p.tweet_id, p.num) in listed_keys
+    favorite_keys = ctx.get_favorite_keys()
+    items = [_post_payload(p, favorite_keys) for p in page]
     return JSONResponse(
         {
             "total": total,
@@ -79,6 +77,26 @@ def api_posts(
     )
 
 
+@router.post("/api/posts/{tweet_id}/{num}/favorite")
+def api_toggle_post_favorite(
+    tweet_id: str,
+    num: int,
+    on: int | None = Query(default=None),
+    ctx: AppContext = Depends(get_context),
+) -> JSONResponse:
+    """お気に入りの設定。``on=1/0`` は「その状態にする」冪等な指定。
+
+    ``on`` 省略時は従来どおりトグル。UI は常に ``on`` を明示的に送る —
+    表示が実際の状態とズレていても、望んだ状態が確定するので取り違えで
+    お気に入りを消すことがない。"""
+    if on is None:
+        new_state = ctx.db.toggle_post_favorite(tweet_id, num)
+    else:
+        new_state = ctx.db.set_post_favorite(tweet_id, num, bool(on))
+    ctx.invalidate_favorite_keys()
+    return JSONResponse({"favorite": new_state})
+
+
 @router.get("/api/posts/by-tweet/{tweet_id}")
 def api_posts_by_tweet(tweet_id: str, ctx: AppContext = Depends(get_context)) -> JSONResponse:
     idx = ctx.get_index()
@@ -86,7 +104,8 @@ def api_posts_by_tweet(tweet_id: str, ctx: AppContext = Depends(get_context)) ->
         (p for p in idx.posts if p.tweet_id == tweet_id),
         key=lambda p: p.num,
     )
-    return JSONResponse({"items": [_post_payload(p) for p in items]})
+    favorite_keys = ctx.get_favorite_keys()
+    return JSONResponse({"items": [_post_payload(p, favorite_keys) for p in items]})
 
 
 @router.get("/api/authors/{author}/summary")
@@ -142,7 +161,7 @@ def api_author_unliked(
             "offset": offset,
             "limit": limit,
             "has_more": len(posts) >= limit,
-            "items": [_timeline_payload(p) for p in unliked],
+            "items": [_timeline_payload(p, ctx.get_favorite_keys()) for p in unliked],
         }
     )
 
@@ -190,7 +209,8 @@ def delete_post(tweet_id: str, num: int, ctx: AppContext = Depends(get_context))
     # not re-download this tweet's media.
     ctx.db.delete_post(tweet_id, num)
     ctx.db.remove_item_from_all_lists(tweet_id, num)
-    ctx.invalidate_listed_keys()
+    ctx.db.remove_post_favorite(tweet_id, num)
+    ctx.invalidate_favorite_keys()
     ctx.db.forget_hash(rel)
     ctx.refresh_index()
     return JSONResponse({"deleted": True})

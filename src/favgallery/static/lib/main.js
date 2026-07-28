@@ -7,10 +7,9 @@ import { showNotice } from 'notices';
 import { cancelActiveDialog } from 'dialog';
 import { closeReader } from 'reader';
 import { closeLightbox } from 'lightbox';
-import { closeListPopover } from 'popovers';
 import { fetchBooks, loadBookTags } from 'bookshelf';
 import { fetchPosts, loadMoreUnliked, exitUnlikedMode, setDensity } from 'posts';
-import { loadLibrary, loadLists, loadFavoriteAuthors, renderFilterChips } from 'library';
+import { loadLibrary, refreshFavoriteCount, loadFavoriteAuthors, renderFilterChips } from 'library';
 import { loadLastSeen, setupSeenObserver } from 'timeline';
 import { pollSync } from 'sync';
 import { loadMe } from 'mylikes';
@@ -153,7 +152,7 @@ io.observe(sentinel);
 
 // --- Init ----------------------------------------------------------
 (async () => {
-  await Promise.all([loadLibrary(), loadLists(), loadLastSeen(), loadMe(), loadFavoriteAuthors()]);
+  await Promise.all([loadLibrary(), refreshFavoriteCount(), loadLastSeen(), loadMe(), loadFavoriteAuthors()]);
   setupSeenObserver();
   await fetchPosts();
   // Auto-sync on page load — runs in background, does not block UI.
@@ -180,8 +179,6 @@ document.addEventListener('keydown', (e) => {
   if (upload) { upload.remove(); return; }
   const reader = document.getElementById('readerModal');
   if (reader && !reader.classList.contains('hidden')) { closeReader(); return; }
-  const lp = document.getElementById('listPopover');
-  if (lp && !lp.classList.contains('hidden')) { lp.classList.add('hidden'); return; }
   const op = document.getElementById('optionsPopover');
   if (op && !op.classList.contains('hidden')) { op.classList.add('hidden'); }
 });
@@ -200,7 +197,7 @@ function syncScrollLock() {
 // スクロールロックと「戻るボタンのガード」を、オーバーレイの開閉に合わせて一括再同期。
 const _lockWatch = new MutationObserver(() => { syncScrollLock(); reconcileGuard(); });
 _lockWatch.observe(document.body, { childList: true });
-for (const id of ['app-sidebar', 'readerModal', 'lightbox', 'listPopover', 'optionsPopover', 'readerStrip']) {
+for (const id of ['app-sidebar', 'readerModal', 'lightbox', 'optionsPopover', 'readerStrip']) {
   const n = document.getElementById(id);
   if (n) _lockWatch.observe(n, { attributes: true, attributeFilter: ['class'] });
 }
@@ -229,7 +226,7 @@ function _readerStripOpen() {
 // いま「戻るで閉じられる」オーバーレイが1つでも開いているか。
 function anyOverlayOpen() {
   return _present('appDialog') || _present('bookUploadModal') || _present('cookieModal')
-    || _shown('readerModal') || _shown('lightbox') || _shown('listPopover')
+    || _shown('readerModal') || _shown('lightbox')
     || _shown('optionsPopover') || _sidebarOpen();
 }
 
@@ -252,7 +249,6 @@ function closeTopmostLayer() {
   if (_readerStripOpen()) { document.getElementById('readerStrip').classList.add('hidden'); return true; }
   if (_shown('readerModal')) { closeReader(); return true; }
   if (_shown('lightbox')) { closeLightbox(); return true; }
-  if (_shown('listPopover')) { closeListPopover(); return true; }
   if (_shown('optionsPopover')) { document.getElementById('optionsPopover').classList.add('hidden'); return true; }
   if (_sidebarOpen()) { _closeSidebar(); return true; }
   return false;

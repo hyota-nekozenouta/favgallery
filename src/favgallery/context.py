@@ -100,23 +100,22 @@ class AppContext:
         self.set_index(idx)
         return idx
 
-    # --- listed-keys cache (perf Phase 1 / 2026-06-10) -----------------------
-    def get_listed_keys(self) -> set[tuple[str, int]]:
-        """Cached list-membership keys for /api/posts ``in_any_list``.
+    # --- favorite-keys cache -------------------------------------------------
+    def get_favorite_keys(self) -> set[tuple[str, int]]:
+        """Cached post-favorite keys for /api/posts ``is_favorite``.
 
-        Was a full ``list_items`` table read on EVERY /api/posts request.
-        Must be invalidated by every mutation that changes membership:
-        list item add/remove, list deletion, post deletion."""
+        Avoids a full ``post_favorites`` table read on every /api/posts request.
+        Must be invalidated by favorite toggles and post deletion."""
         with self.state_lock:
-            cached = self._state.get("listed_keys")
+            cached = self._state.get("favorite_keys")
             if cached is None:
-                cached = self.db.all_listed_post_keys()
-                self._state["listed_keys"] = cached
+                cached = self.db.favorite_post_keys()
+                self._state["favorite_keys"] = cached
             return cached  # type: ignore[return-value]
 
-    def invalidate_listed_keys(self) -> None:
+    def invalidate_favorite_keys(self) -> None:
         with self.state_lock:
-            self._state.pop("listed_keys", None)
+            self._state.pop("favorite_keys", None)
 
     # --- misc helpers -------------------------------------------------------
     def me_username(self) -> str:

@@ -3,7 +3,6 @@
 import { state } from 'state';
 import { $, $$, escapeHtml } from 'dom';
 import { showNotice } from 'notices';
-import { confirmDialog, promptDialog } from 'dialog';
 import { fetchPosts, enterUnlikedMode, exitUnlikedMode } from 'posts';
 import { icon } from 'icons';
 
@@ -155,77 +154,35 @@ export function renderTags() {
   }));
 }
 
-// --- Lists ---------------------------------------------------------
-export async function loadLists() {
-  const r = await fetch('/api/lists');
-  state.lists = await r.json();
-  renderListSidebar();
+// --- お気に入り (旧「名前付きリスト」を置き換える単一のお気に入り) -----------
+// 件数は /api/posts?favorite=1&limit=1 の total から取る（専用APIを増やさない）。
+export async function refreshFavoriteCount() {
+  try {
+    const r = await fetch('/api/posts?favorite=1&limit=1&offset=0');
+    if (!r.ok) return;
+    const d = await r.json();
+    const el = $('#favCount');
+    if (el) el.textContent = (d.total || 0).toLocaleString();
+  } catch { /* 件数表示は落ちても致命的でない */ }
 }
 
-export function renderListSidebar() {
-  if (!state.lists.length) {
-    $('#listSidebar').innerHTML = '<div class="text-xs text-zinc-600 px-1 py-1">まだ無し</div>';
-    return;
-  }
-  $('#listSidebar').innerHTML = state.lists.map(l => {
-    const active = state.filter.list_id === l.id;
-    return `<div class="flex items-center gap-1">
-      <button class="list-btn flex-1 text-left px-2 py-1.5 rounded text-sm flex items-center justify-between ${active ? 'bg-indigo-600/20 text-indigo-300' : 'hover:bg-zinc-800 text-zinc-300'}"
-              data-list-id="${l.id}">
-        <span class="truncate">${escapeHtml(l.name)}</span>
-        <span class="text-xs text-zinc-500 ml-2">${l.count}</span>
-      </button>
-      <button class="list-del text-zinc-500 hover:text-rose-400 px-1" title="削除" aria-label="削除" data-list-id="${l.id}">${icon('x')}</button>
-    </div>`;
-  }).join('');
-  $$('.list-btn').forEach(b => b.addEventListener('click', () => {
-    const id = parseInt(b.dataset.listId, 10);
-    state.filter.list_id = state.filter.list_id === id ? null : id;
-    state.offset = 0; state.posts = [];
-    renderListSidebar(); renderFilterChips(); fetchPosts();
-  }));
-  $$('.list-del').forEach(b => b.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    const id = parseInt(b.dataset.listId, 10);
-    const l = state.lists.find(x => x.id === id);
-    if (!l) return;
-    const ok = await confirmDialog({
-      title: 'リストを削除しますか？',
-      message: `「${l.name}」`,
-      confirmLabel: '削除', danger: true,
-    });
-    if (!ok) return;
-    await fetch(`/api/lists/${id}`, { method: 'DELETE' });
-    if (state.filter.list_id === id) {
-      state.filter.list_id = null;
-      state.offset = 0; state.posts = [];
-    }
-    await loadLists();
-    renderFilterChips();
-    fetchPosts();
-  }));
+export function renderFavFilter() {
+  const btn = $('#favFilterBtn');
+  if (btn) btn.classList.toggle('bg-zinc-800', !!state.filter.favorite);
 }
 
-$('#newListBtn').addEventListener('click', async () => {
-  const name = await promptDialog({
-    title: '新しいリスト', label: 'リスト名', placeholder: 'リスト名', confirmLabel: '作成',
-  });
-  if (!name || !name.trim()) return;
-  const r = await fetch('/api/lists', {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name: name.trim() }),
-  });
-  if (!r.ok) { showNotice('作成失敗 (同名のリストが既にある可能性)', { kind: 'error' }); return; }
-  await loadLists();
+$('#favFilterBtn')?.addEventListener('click', () => {
+  state.filter.favorite = !state.filter.favorite;
+  state.offset = 0; state.posts = [];
+  renderFavFilter(); renderFilterChips(); fetchPosts();
 });
 
 // --- Filter chips --------------------------------------------------
 export function renderFilterChips() {
   const f = state.filter;
   const chips = [];
-  if (f.list_id) {
-    const l = state.lists.find(x => x.id === f.list_id);
-    if (l) chips.push(`<span class="chip active rounded px-3 py-1 text-sm cursor-pointer inline-flex items-center gap-1" data-clear="list_id">${icon('list')} ${escapeHtml(l.name)} ${icon('x')}</span>`);
+  if (f.favorite) {
+    chips.push(`<span class="chip active rounded px-3 py-1 text-sm cursor-pointer inline-flex items-center gap-1" data-clear="favorite">${icon('star')} お気に入り ${icon('x')}</span>`);
   }
   if (f.author) chips.push(`<span class="chip active rounded px-3 py-1 text-sm cursor-pointer inline-flex items-center gap-1" data-clear="author">@${escapeHtml(f.author)} ${icon('x')}</span>`);
   if (f.tag)    chips.push(`<span class="chip active rounded px-3 py-1 text-sm cursor-pointer inline-flex items-center gap-1" data-clear="tag">#${escapeHtml(f.tag)} ${icon('x')}</span>`);
@@ -234,10 +191,10 @@ export function renderFilterChips() {
   $('#filterChips').innerHTML = chips.join('');
   $$('#filterChips [data-clear]').forEach(el => el.addEventListener('click', () => {
     const k = el.dataset.clear;
-    state.filter[k] = (k === 'media_type') ? '' : null;
+    state.filter[k] = (k === 'media_type') ? '' : (k === 'favorite' ? false : null);
     if (k === 'q') { $('#searchBox').value = ''; state.filter.q = ''; }
     state.offset = 0; state.posts = [];
-    markActiveAuthor(); renderTags(); renderListSidebar(); renderFilterChips(); fetchPosts();
+    markActiveAuthor(); renderTags(); renderFavFilter(); renderFilterChips(); fetchPosts();
   }));
 }
 

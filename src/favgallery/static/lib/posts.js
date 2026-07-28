@@ -5,9 +5,8 @@ import { state } from 'state';
 import { $, $$, escapeHtml } from 'dom';
 import { showNotice } from 'notices';
 import { confirmDialog } from 'dialog';
-import { renderAuthorHeader } from 'library';
+import { renderAuthorHeader, refreshFavoriteCount } from 'library';
 import { openLightbox, renderLightbox } from 'lightbox';
-import { openListPopover } from 'popovers';
 import { observeNewTiles } from 'timeline';
 import { icon } from 'icons';
 
@@ -327,7 +326,7 @@ export async function fetchPosts() {
     if (state.filter.tag) params.set('tag', state.filter.tag);
     if (state.filter.media_type) params.set('media_type', state.filter.media_type);
     if (state.filter.q) params.set('q', state.filter.q);
-    if (state.filter.list_id) params.set('list', state.filter.list_id);
+    if (state.filter.favorite) params.set('favorite', '1');
     if (state.sort && state.sort !== 'new') params.set('sort', state.sort);  // 既定(new)は送らず現状のURLを維持
     params.set('limit', state.limit); params.set('offset', state.offset);
   }
@@ -376,7 +375,7 @@ export function compareIds(a, b) {
 function emptyStateHtml() {
   // Phase 5: 結果ゼロの真っ白画面を案内に変える
   const filtered = !!(state.filter.author || state.filter.tag || state.filter.q
-    || state.filter.media_type || state.filter.list_id);
+    || state.filter.media_type || state.filter.favorite);
   if (filtered) {
     return `<div class="empty-state"><div class="glyph">∅</div>
       <div class="title">この条件に合う投稿はありません</div>
@@ -466,30 +465,24 @@ function _appendReelTiles(items) {
   _bindTiles(newTiles);
 }
 
-// タイル/リール共通のイベント bind（click→lightbox / add / like / del）。
+// タイル/リール共通のイベント bind（click→lightbox / お気に入り / いいね）。
 function _bindTiles(tiles) {
   tiles.forEach(el => {
     el.dataset.bound = '1';
     el.addEventListener('click', (e) => {
-      if (e.target.classList.contains('add-btn')) return;
+      if (e.target.classList.contains('fav-btn')) return;
       if (e.target.classList.contains('like-btn')) return;
-      if (e.target.classList.contains('del-btn')) return;
       openLightbox(parseInt(el.dataset.idx, 10));
     });
-    const ab = el.querySelector('.add-btn');
-    if (ab) ab.addEventListener('click', (e) => {
+    const fb = el.querySelector('.fav-btn');
+    if (fb) fb.addEventListener('click', async (e) => {
       e.stopPropagation();
-      openListPopover(parseInt(el.dataset.idx, 10), ab);
+      await toggleFavoritePost(state.posts[parseInt(el.dataset.idx, 10)], fb);
     });
     const lb = el.querySelector('.like-btn');
     if (lb) lb.addEventListener('click', async (e) => {
       e.stopPropagation();
       await likeAndSave(parseInt(el.dataset.idx, 10), lb);
-    });
-    const db = el.querySelector('.del-btn');
-    if (db) db.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await deletePost(parseInt(el.dataset.idx, 10), el);
     });
   });
 }
@@ -515,6 +508,8 @@ export async function deletePost(idx, tileEl) {
   if (tileEl && tileEl.parentNode) tileEl.parentNode.removeChild(tileEl);
   // data-idx を詰める（列分割でも 1 列でも正しい数値方式 / DOM 順非依存）。
   _reindexAfterRemoval(idx);
+  // 削除でお気に入りからも外れる（サーバ側で削除済み）ので件数を取り直す。
+  if (p.is_favorite) refreshFavoriteCount();
 }
 
 async function likeAndSave(idx, btn) {
@@ -583,6 +578,61 @@ export function markLikedEverywhere(tweetId, saved) {
   dropUnlikedByTweetId(tweetId);
 }
 
+// お気に入り★ボタン。未追加=暗いグレーの輪郭 / 追加済み=黄色の塗り (CSS .is-fav)。
+function favBtnHtml(p) {
+  const on = !!p.is_favorite;
+  return `<div class="fav-btn${on ? ' is-fav' : ''}" title="${on ? 'お気に入りから外す' : 'お気に入りに追加'}" aria-label="お気に入り">${icon('star')}</div>`;
+}
+
+// お気に入りのトグル（ワンタップ）。タイムラインの投稿はまだ手元に無いので、
+// 先に「X でいいね + 保存」してから登録する（旧リスト追加時と同じ挙動）。
+export async function toggleFavoritePost(p, btn) {
+  if (!p || btn?.dataset.busy) return;
+  if (btn) btn.dataset.busy = '1';
+  try {
+    if (state.tab === 'timeline') {
+      const dummy = { classList: { add: () => {}, remove: () => {} }, title: '', style: {} };
+      await likeAndSavePost(p, dummy);
+    }
+    // 望む状態を明示して送る（トグルにしない）。表示が実際とズレていても、
+    // 取り違えて既存のお気に入りを消してしまう事故が起きない。
+    const want = p.is_favorite ? 0 : 1;
+    const r = await fetch(
+      `/api/posts/${encodeURIComponent(p.tweet_id)}/${p.num}/favorite?on=${want}`,
+      { method: 'POST' });
+    if (!r.ok) { showNotice('お気に入りの更新に失敗しました: ' + r.status, { kind: 'error' }); return; }
+    const d = await r.json();
+    p.is_favorite = !!d.favorite;
+    if (btn) {
+      btn.classList.toggle('is-fav', p.is_favorite);
+      btn.title = p.is_favorite ? 'お気に入りから外す' : 'お気に入りに追加';
+    }
+    syncFavButtons(p);
+    refreshFavoriteCount();
+  } finally {
+    if (btn) delete btn.dataset.busy;
+  }
+}
+
+// 同じ投稿を指す他の★（グリッド/リール/ライトボックス）の見た目を揃える。
+// ライトボックスの items は by-tweet 取得で別オブジェクトになりうるので、
+// オブジェクト同一性ではなく tweet_id + num で突き合わせる（削除処理と同じ方式）。
+function syncFavButtons(p) {
+  const idx = state.posts.findIndex(x => x.tweet_id === p.tweet_id && x.num === p.num);
+  if (idx >= 0) {
+    state.posts[idx].is_favorite = !!p.is_favorite;
+    $$(`#masonry [data-idx="${idx}"] .fav-btn`).forEach(b => {
+      b.classList.toggle('is-fav', !!p.is_favorite);
+    });
+  }
+  const cur = state.lb.items?.[state.lb.pos];
+  const lbFav = document.getElementById('lbFavBtn');
+  if (lbFav && cur && cur.tweet_id === p.tweet_id && cur.num === p.num) {
+    cur.is_favorite = !!p.is_favorite;
+    lbFav.classList.toggle('is-fav', !!p.is_favorite);
+  }
+}
+
 function tileHtml(p, idx) {
   const isVideo = p.media_type === 'video' || p.extension === 'mp4';
   const thumbSrc = `${p.thumb_url}${p.thumb_url.includes('?') ? '&' : '?'}size=600`;
@@ -590,16 +640,15 @@ function tileHtml(p, idx) {
   const media = isVideo
     ? `<img src="" alt="" data-video-src="${p.media_url}"${dims} style="background:#111;min-height:80px" />`
     : `<img src="${thumbSrc}" loading="lazy" decoding="async" alt=""${dims} />`;
+  // 削除はタイルには出さない（画像を開いた時＝ライトボックスでのみ）。
   const sideBtn = state.tab === 'timeline'
     ? `<div class="like-btn" title="X でいいね + 保存">${icon('heart')}</div>`
-    : `<div class="del-btn" title="削除 (再ダウンロード防止)">🗑</div>`;
-  const addBtn = `<div class="add-btn" title="リストに追加">+</div>`;
-  const starBadge = p.in_any_list ? `<div class="list-star">★</div>` : '';
+    : '';
+  const favBtn = favBtnHtml(p);
   return `<div class="tile cursor-pointer" data-idx="${idx}">
     ${media}
     ${sideBtn}
-    ${addBtn}
-    ${starBadge}
+    ${favBtn}
     <div class="info">
       <div class="truncate">${escapeHtml(p.author_nick || p.author_name)} <span class="text-zinc-400">@${escapeHtml(p.author_name)}</span></div>
       ${p.favorite_count ? `<div class="text-zinc-400 text-[11px] inline-flex items-center gap-1">${icon('heart')} ${p.favorite_count.toLocaleString()}</div>` : ''}
@@ -616,14 +665,14 @@ function reelItemHtml(p, idx, isSeenBoundary = false) {
     : `<img src="${p.media_url}" loading="lazy" decoding="async" alt="" />`;
   const sideBtn = state.tab === 'timeline'
     ? `<div class="like-btn" title="X でいいね + 保存">${icon('heart')}</div>`
-    : `<div class="del-btn" title="削除 (再ダウンロード防止)">🗑</div>`;
-  const addBtn = `<div class="add-btn" title="リストに追加">+</div>`;
+    : '';
+  const favBtn = favBtnHtml(p);
   const seenBadge = isSeenBoundary ? `<div class="reel-seen-badge">${icon('check')} ここまで見た</div>` : '';
   return `<div class="reel-item cursor-pointer" data-idx="${idx}">
     ${seenBadge}
     ${media}
     ${sideBtn}
-    ${addBtn}
+    ${favBtn}
     <div class="reel-info">
       <div class="truncate">${escapeHtml(p.author_nick || p.author_name)} <span class="opacity-60">@${escapeHtml(p.author_name)}</span></div>
       ${p.favorite_count ? `<div class="opacity-60 text-[11px] inline-flex items-center gap-1">${icon('heart')} ${p.favorite_count.toLocaleString()}</div>` : ''}

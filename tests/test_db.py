@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import dataclasses
+import sqlite3
 from pathlib import Path
 
 import pytest
 
-from favgallery.db import Database, TimelinePost
+from favgallery.db import SCHEMA, Database, TimelinePost
 
 
 @pytest.fixture
@@ -70,6 +71,40 @@ def test_all_post_keys_returns_inserted_keys(db: Database) -> None:
 @pytest.mark.unit
 def test_all_post_keys_empty_when_no_posts(db: Database) -> None:
     assert db.all_post_keys() == set()
+
+
+@pytest.mark.unit
+def test_list_items_migrate_to_post_favorites_once(tmp_path: Path) -> None:
+    path = tmp_path / "x.sqlite"
+    conn = sqlite3.connect(path)
+    conn.executescript(SCHEMA)
+    conn.execute("DROP TABLE post_favorites")
+    conn.execute("INSERT INTO lists (name, created_at) VALUES (?, ?)", ("a", 1))
+    conn.execute("INSERT INTO lists (name, created_at) VALUES (?, ?)", ("b", 2))
+    conn.execute(
+        "INSERT INTO list_items (list_id, tweet_id, num, added_at) VALUES (?, ?, ?, ?)",
+        (1, "111", 1, 20),
+    )
+    conn.execute(
+        "INSERT INTO list_items (list_id, tweet_id, num, added_at) VALUES (?, ?, ?, ?)",
+        (2, "111", 1, 10),
+    )
+    conn.execute(
+        "INSERT INTO list_items (list_id, tweet_id, num, added_at) VALUES (?, ?, ?, ?)",
+        (2, "222", 2, 30),
+    )
+    conn.commit()
+    conn.close()
+
+    first = Database(path)
+    assert first.favorite_post_keys() == {("111", 1), ("222", 2)}
+    assert first.get_setting("favorites_migrated_from_lists") == "1"
+    first.toggle_post_favorite("111", 1)
+    first.close()
+
+    reopened = Database(path)
+    assert reopened.favorite_post_keys() == {("222", 2)}
+    reopened.close()
 
 
 @pytest.mark.unit

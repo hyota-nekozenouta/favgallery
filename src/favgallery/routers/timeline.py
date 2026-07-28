@@ -44,7 +44,7 @@ def timeline_index(
     return JSONResponse(
         {
             "total": total,
-            "items": [_timeline_payload(p) for p in posts],
+            "items": [_timeline_payload(p, ctx.get_favorite_keys()) for p in posts],
             "offset": offset,
             "limit": limit,
         }
@@ -54,7 +54,8 @@ def timeline_index(
 @router.get("/api/timeline/by-tweet/{tweet_id}")
 def timeline_by_tweet(tweet_id: str, ctx: AppContext = Depends(get_context)) -> JSONResponse:
     posts = ctx.db.select_timeline_posts_by_tweet(tweet_id)
-    return JSONResponse({"items": [_timeline_payload(p) for p in posts]})
+    favorite_keys = ctx.get_favorite_keys()
+    return JSONResponse({"items": [_timeline_payload(p, favorite_keys) for p in posts]})
 
 
 @router.post("/api/timeline/refresh")

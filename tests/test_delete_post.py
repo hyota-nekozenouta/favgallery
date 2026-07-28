@@ -68,16 +68,11 @@ def test_delete_does_not_resurrect_after_reingest(
 
 
 @pytest.mark.integration
-def test_delete_removes_from_lists(client: TestClient) -> None:
-    list_id = client.post("/api/lists", json={"name": "favs"}).json()["id"]
-    client.post(f"/api/lists/{list_id}/items", json={"tweet_id": "1001", "num": 1})
-    assert client.get("/api/posts/lists", params={"tweet_id": "1001", "num": 1}).json()[
-        "list_ids"
-    ] == [list_id]
-
+def test_delete_removes_from_favorites(client: TestClient) -> None:
+    assert client.post("/api/posts/1001/1/favorite").json() == {"favorite": True}
     client.delete("/api/posts/1001/1")
-    after = client.get("/api/posts/lists", params={"tweet_id": "1001", "num": 1}).json()
-    assert after["list_ids"] == []
+    after = client.get("/api/posts?favorite=1").json()
+    assert after["items"] == []
 
 
 @pytest.mark.integration

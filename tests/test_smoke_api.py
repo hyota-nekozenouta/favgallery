@@ -144,38 +144,19 @@ def test_favorite_authors_default_empty(smoke_client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Lists tab + list filter on /api/posts
+# Post favorites + favorite filter on /api/posts
 # ---------------------------------------------------------------------------
 
-def test_lists_crud_and_post_filter(smoke_client: TestClient) -> None:
-    """Create list → add post → /api/posts?list=<id> returns only that post."""
-    r = smoke_client.post("/api/lists", json={"name": "fav"})
-    assert r.status_code in (200, 201)
-    list_id = r.json().get("id") or r.json().get("list", {}).get("id")
-    assert list_id, f"expected id in response, got {r.json()}"
+def test_post_favorite_and_filter(smoke_client: TestClient) -> None:
+    """Favorite a post → /api/posts?favorite=1 returns only that post."""
+    r = smoke_client.post("/api/posts/1001/1/favorite")
+    assert r.status_code == 200
+    assert r.json() == {"favorite": True}
 
-    r2 = smoke_client.post(
-        f"/api/lists/{list_id}/items",
-        json={"tweet_id": "1001", "num": 1},
-    )
-    assert r2.status_code in (200, 201, 204)
-
-    r3 = smoke_client.get(f"/api/posts?list={list_id}")
-    assert r3.status_code == 200
-    items = r3.json()["items"]
+    r2 = smoke_client.get("/api/posts?favorite=1")
+    assert r2.status_code == 200
+    items = r2.json()["items"]
     assert items and all(it["tweet_id"] == "1001" for it in items)
-
-
-def test_lists_index(smoke_client: TestClient) -> None:
-    r = smoke_client.get("/api/lists")
-    assert r.status_code == 200
-
-
-def test_posts_lists_membership(smoke_client: TestClient) -> None:
-    """Per-post list membership lookup (used by the ★ overlay)."""
-    r = smoke_client.get("/api/posts/lists?tweet_id=1001&num=1")
-    assert r.status_code == 200
-    assert "list_ids" in r.json()
 
 
 # ---------------------------------------------------------------------------

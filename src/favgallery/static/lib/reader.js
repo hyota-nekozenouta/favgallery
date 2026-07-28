@@ -1,6 +1,9 @@
 // 漫画リーダー (3 ペインのスライドトラック + RTL ドラッグ/タップ/キーボードナビ)。
-// (Phase 4B: main.js から分離。state のみ依存のリーフ)
+// (Phase 4B: main.js から分離。state / dialog / notices に依存。bookshelf は
+//  循環参照になるので import せず 'fg:books-changed' イベントで通知する)
 import { state } from 'state';
+import { confirmDialog } from 'dialog';
+import { showNotice } from 'notices';
 
 state.reader = { bookId: null, pages: [], pos: 0 };
 
@@ -250,3 +253,24 @@ document.addEventListener('keydown', (e) => {
 document.getElementById('readerCloseBtn')?.addEventListener('click', () => closeReader());
 // ページ一覧トグル
 document.getElementById('readerThumbsBtn')?.addEventListener('click', () => toggleStrip());
+
+// 開いている漫画を削除（削除ボタンは「開いている時」だけ出す方針）。
+document.getElementById('readerDelBtn')?.addEventListener('click', async () => {
+  const bookId = state.reader.bookId;
+  if (bookId == null) return;
+  const ok = await confirmDialog({
+    title: 'この漫画を削除しますか？',
+    message: '元に戻せません。',
+    confirmLabel: '削除', danger: true,
+  });
+  if (!ok) return;
+  try {
+    const r = await fetch(`/api/books/${bookId}`, { method: 'DELETE' });
+    if (!r.ok) { showNotice('削除に失敗しました: ' + r.status, { kind: 'error' }); return; }
+  } catch (e) {
+    showNotice('削除に失敗しました: ' + e.message, { kind: 'error' });
+    return;
+  }
+  closeReader();
+  document.dispatchEvent(new CustomEvent('fg:books-changed'));
+});

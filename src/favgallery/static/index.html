@@ -38,6 +38,7 @@
     <symbol id="ic-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
     <symbol id="ic-check" viewBox="0 0 24 24"><path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/></symbol>
     <symbol id="ic-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></symbol>
+    <symbol id="ic-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6"/><path d="M14 11v6"/></symbol>
   </defs></svg>
   <div id="sidebar-overlay"></div>
   <div class="flex h-screen">
@@ -66,13 +67,11 @@
       </div>
 
       <div id="sidebarPosts" class="flex-1 overflow-y-auto scroll-thin">
-        <!-- Lists -->
+        <!-- Favorites (旧「名前付きリスト」を置き換える単一のお気に入り) -->
         <div class="px-4 py-3 border-b border-zinc-800">
-          <div class="flex items-center justify-between mb-2">
-            <div class="text-xs uppercase tracking-wider text-zinc-500 flex items-center gap-1"><svg class="icon" aria-hidden="true"><use href="#ic-list"/></svg> リスト</div>
-            <button id="newListBtn" class="text-xs text-indigo-400 hover:text-indigo-300">+ 新規</button>
-          </div>
-          <div id="listSidebar" class="space-y-1"></div>
+          <button id="favFilterBtn" class="w-full flex items-center gap-2 text-sm text-zinc-300 hover:text-white py-1 px-2 rounded hover:bg-zinc-800 transition-colors">
+            <svg class="icon" aria-hidden="true"><use href="#ic-star"/></svg> <span>お気に入り</span> <span id="favCount" class="ml-auto text-xs text-zinc-500">0</span>
+          </button>
         </div>
         <!-- Authors -->
         <div class="px-4 py-3">
@@ -176,6 +175,7 @@
   <div id="readerModal" class="fixed inset-0 bg-black hidden items-center justify-center z-[60] select-none overflow-hidden">
     <div id="readerCloseBtn" class="absolute top-4 right-6 text-zinc-400 hover:text-white cursor-pointer z-20" role="button" aria-label="閉じる"><svg class="icon" aria-hidden="true" style="width:28px;height:28px"><use href="#ic-x"/></svg></div>
     <button id="readerThumbsBtn" class="reader-ctrl-btn" title="ページ一覧" aria-label="ページ一覧"><svg class="icon" aria-hidden="true" style="width:22px;height:22px"><use href="#ic-grid"/></svg></button>
+    <button id="readerDelBtn" class="reader-ctrl-btn reader-ctrl-2 reader-del" title="この漫画を削除" aria-label="この漫画を削除"><svg class="icon" aria-hidden="true" style="width:22px;height:22px"><use href="#ic-trash"/></svg></button>
     <div class="absolute top-4 left-1/2 -translate-x-1/2 text-zinc-400 text-sm z-20" id="readerPageNum">1 / 1</div>
     <!-- 3-pane slide track. RTL (manga) layout left->right = [next, current, prev]. -->
     <div id="readerViewport" class="absolute inset-0 overflow-hidden touch-none">
@@ -188,9 +188,6 @@
     <!-- ページ一覧(サムネ列)。RTL 右→左。既定は hidden、ページ一覧ボタンで開閉。 -->
     <div id="readerStrip" class="reader-strip hidden" aria-label="ページ一覧"></div>
   </div>
-
-  <!-- List popover (single shared instance) -->
-  <div id="listPopover" class="popover hidden"></div>
 
   <!-- Options popover -->
   <div id="optionsPopover" class="popover hidden" style="top:0;left:0">

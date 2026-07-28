@@ -127,6 +127,15 @@ CREATE TABLE IF NOT EXISTS book_favorites (
     added_at REAL NOT NULL
 );
 
+-- 投稿のお気に入り。旧「名前付きリスト」を置き換える単一のお気に入り集合。
+-- 投稿は (tweet_id, num) の複合キー。posts への FK は list_items 同様に張らない。
+CREATE TABLE IF NOT EXISTS post_favorites (
+    tweet_id TEXT NOT NULL,
+    num INTEGER NOT NULL,
+    added_at INTEGER NOT NULL,
+    PRIMARY KEY (tweet_id, num)
+);
+
 -- Per-book perceptual fingerprint, used to skip duplicate books at import time.
 -- cover_phash = pHash of page 1; sample_phashes = JSON [[page_num, phash], ...]
 -- for a few sampled interior pages. Independent of media_hashes because book
@@ -226,6 +235,28 @@ class Database:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS media_hashes_phash ON media_hashes(phash)"
             )
+            # 旧「名前付きリスト」→ お気に入りへの一度きりの移行。失敗しても起動は
+            # 止めず、フラグを立てないので次回起動で再試行される。無言だと原因が
+            # 追えないので print で残す (このモジュールは logger 未使用)。
+            try:
+                row = self._conn.execute(
+                    "SELECT value FROM settings WHERE key = ?",
+                    ("favorites_migrated_from_lists",),
+                ).fetchone()
+                if row is None or row[0] != "1":
+                    self._conn.execute(
+                        "INSERT OR IGNORE INTO post_favorites (tweet_id, num, added_at) "
+                        "SELECT tweet_id, CAST(num AS INTEGER), "
+                        "MIN(COALESCE(added_at, 0)) "
+                        "FROM list_items GROUP BY tweet_id, CAST(num AS INTEGER)"
+                    )
+                    self._conn.execute(
+                        "INSERT INTO settings (key, value) VALUES (?, ?) "
+                        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                        ("favorites_migrated_from_lists", "1"),
+                    )
+            except Exception as exc:  # 移行失敗はアプリ全体を止めない
+                print(f"[db] favorites migration from lists failed (will retry): {exc}")
 
     def close(self) -> None:
         with self._lock:
@@ -310,6 +341,65 @@ class Database:
                 "SELECT DISTINCT tweet_id, num FROM list_items"
             ).fetchall()
         return {(r[0], int(r[1])) for r in rows}
+
+    # --- Post favorites -------------------------------------------------
+
+    def toggle_post_favorite(self, tweet_id: str, num: int) -> bool:
+        with self._lock:
+            existing = self._conn.execute(
+                "SELECT 1 FROM post_favorites WHERE tweet_id = ? AND num = ?",
+                (tweet_id, num),
+            ).fetchone()
+            if existing:
+                self._conn.execute(
+                    "DELETE FROM post_favorites WHERE tweet_id = ? AND num = ?",
+                    (tweet_id, num),
+                )
+                return False
+            else:
+                self._conn.execute(
+                    "INSERT INTO post_favorites (tweet_id, num, added_at) VALUES (?, ?, ?)",
+                    (tweet_id, num, int(time.time())),
+                )
+                return True
+
+    def set_post_favorite(self, tweet_id: str, num: int, on: bool) -> bool:
+        """お気に入りを明示的に設定する冪等版。戻り値は設定後の状態。
+
+        トグルと違い「今の状態」に依存しないので、UI の表示ズレが原因で
+        意図せずお気に入りを外してしまう事故が起きない。"""
+        with self._lock:
+            if on:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO post_favorites (tweet_id, num, added_at) "
+                    "VALUES (?, ?, ?)",
+                    (tweet_id, num, int(time.time())),
+                )
+            else:
+                self._conn.execute(
+                    "DELETE FROM post_favorites WHERE tweet_id = ? AND num = ?",
+                    (tweet_id, num),
+                )
+        return on
+
+    def favorite_post_keys(self) -> set[tuple[str, int]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT tweet_id, num FROM post_favorites"
+            ).fetchall()
+        return {(str(tweet_id), int(num)) for tweet_id, num in rows}
+
+    def remove_post_favorite(self, tweet_id: str, num: int) -> None:
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM post_favorites WHERE tweet_id = ? AND num = ?",
+                (tweet_id, num),
+            )
+
+    def post_favorites_count(self) -> int:
+        with self._lock:
+            (n,) = self._conn.execute("SELECT COUNT(*) FROM post_favorites").fetchone()
+        return int(n)
 
     def get_favorite_authors(self) -> list[str]:
         """Return the saved favorite author list (stored in settings table)."""
