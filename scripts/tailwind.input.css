@@ -100,9 +100,26 @@ body {
   box-shadow: 0 1px 2px rgba(0,0,0,.4);
 }
 /* 画像フェードイン: デコード完了 (.loaded を JS が付与) までは透明。
-   pop-in を無くし一覧全体を上質に見せる。video/カバー欠損プレースホルダは対象外。 */
-.tile img:not(.loaded) { opacity: 0; }
+   pop-in を無くし一覧全体を上質に見せる。
+   .video-poster は除外する — 動画タイルは src が空のまま JS が後から 1 コマを
+   差し込む作りで、キャプチャに失敗すると load も error も来ず .loaded が付かない。
+   以前はここに巻き込まれて黒プレースホルダごと透明になり「動画だけ何も表示され
+   ない」状態になっていた (2026-07-29 修正)。 */
+.tile img:not(.loaded):not(.video-poster) { opacity: 0; }
 .tile img.loaded { opacity: 1; }
+
+/* 動画タイルの ▶ バッジ (サムネが取れても取れなくても動画だと分かる) */
+.play-badge {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 44px; height: 44px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(15,20,25,.62); border: 1px solid rgba(255,255,255,.22);
+  backdrop-filter: blur(2px);
+  color: #fff; pointer-events: none; z-index: 3;
+  transition: background .2s, transform .2s;
+}
+.play-badge .icon { width: 20px; height: 20px; fill: currentColor; stroke: none; margin-left: 2px; }
+.tile:hover .play-badge { background: rgba(15,20,25,.78); transform: translate(-50%, -50%) scale(1.06); }
 .tile:hover img, .tile:hover video {
   transform: scale(1.012);
   box-shadow: 0 6px 28px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.16);

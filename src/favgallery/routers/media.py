@@ -18,36 +18,47 @@ async def api_media(
     """Serve media from R2 when configured, otherwise from the local library."""
     ctx.validate_rel_path(rel_path)
     etag = ctx.strong_etag("media", rel_path)
-    # rel_path uniquely identifies immutable content, so the If-None-Match
-    # short-circuit needs no R2/disk read at all.
-    if request.headers.get("if-none-match") == etag:
-        return Response(
-            status_code=304,
-            headers={"ETag": etag, "Cache-Control": ctx.immutable_cache},
+    target = (ctx.library_root / rel_path).resolve()
+
+    # Local file wins when it exists — same order as /thumb below. Covers media
+    # saved by "like & save" that has not been uploaded to R2 yet: presigning a
+    # key that isn't in the bucket would 302 the browser straight into a
+    # NoSuchKey 404 (the presign call itself never checks existence).
+    if target.is_file():
+        if request.headers.get("if-none-match") == etag:
+            # Local bytes are immutable for a given rel_path, so a long-lived
+            # validated cache entry is correct here (unlike the redirect below).
+            return Response(
+                status_code=304,
+                headers={"ETag": etag, "Cache-Control": ctx.immutable_cache},
+            )
+        # FileResponse.set_stat_headers uses setdefault, so our ETag is preserved.
+        return FileResponse(
+            target, headers={"Cache-Control": ctx.immutable_cache, "ETag": etag}
         )
+
     if ctx.r2_client is not None:
         try:
             presigned = ctx.r2_client.generate_presigned_get_url(rel_path)
-            # `private` (not `public`) so Cloudflare's edge does NOT cache the
-            # 302 — otherwise expired presigned URLs would be served past their
-            # signature TTL. max-age=300 < signature TTL=600 so the browser
-            # re-fetches a fresh signed URL before the previous one expires.
+            # No ETag / no 304 short-circuit on this branch. A 304's headers
+            # replace those of the stored response (RFC 9111 §4.3.4), so
+            # answering with `immutable` once promoted the cached 302 to
+            # "valid for a year, never revalidate" — the browser then kept
+            # replaying a presigned URL long past its 600s signature TTL and
+            # R2 answered 403 forever (the ETag is derived from rel_path only,
+            # so it never changed and the entry never recovered). Presigning is
+            # a local signature computation with no network call, so simply
+            # issuing a fresh redirect every time is cheap and cannot go stale.
+            # `private` also keeps Cloudflare's edge from caching the redirect.
             return RedirectResponse(
                 url=presigned,
                 status_code=302,
-                headers={
-                    "Cache-Control": "private, max-age=300",
-                    "ETag": etag,
-                },
+                headers={"Cache-Control": "private, max-age=300"},
             )
         except Exception:
-            # Fall through to local filesystem if presigned issuance fails.
+            # Fall through to 404 if presigned issuance fails.
             pass
-    target = (ctx.library_root / rel_path).resolve()
-    if not target.is_file():
-        raise HTTPException(status_code=404, detail="not found")
-    # FileResponse.set_stat_headers uses setdefault, so our ETag is preserved.
-    return FileResponse(target, headers={"Cache-Control": ctx.immutable_cache, "ETag": etag})
+    raise HTTPException(status_code=404, detail="not found")
 
 
 @router.get("/media/{rel_path:path}")

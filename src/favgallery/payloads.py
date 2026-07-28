@@ -10,6 +10,17 @@ from favgallery.db import TimelinePost
 from favgallery.scanner import Post
 from favgallery.x_helpers import tweet_url
 
+# Cache-buster for /api/media URLs. Bump this when a previously served response
+# must be abandoned by browsers that already cached it.
+#
+# v2 (2026-07-29): /api/media answered conditional requests with a 304 carrying
+# `immutable`, which — per RFC 9111 §4.3.4 — rewrote the cached 302's headers to
+# "valid for a year, never revalidate". Those clients kept replaying a presigned
+# R2 URL long after its 600s signature expired and got 403s, with no way back:
+# the URL and its ETag never change, so the browser never asks the server again.
+# Changing the URL is the only thing that retires those poisoned entries.
+MEDIA_URL_VERSION = "v=2"
+
 
 def _base_payload(
     *,
@@ -66,7 +77,7 @@ def _post_payload(p: Post, favorite_keys: set[tuple[str, int]] | None = None) ->
         favorite_keys=favorite_keys,
         tweet_id=p.tweet_id,
         num=p.num,
-        media_url=f"/api/media/{p.rel_media}",
+        media_url=f"/api/media/{p.rel_media}?{MEDIA_URL_VERSION}",
         thumb_url=f"/thumb/{p.rel_media}",
         media_type=p.media_type,
         extension=p.extension,

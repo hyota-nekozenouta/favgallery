@@ -185,15 +185,24 @@ def test_api_media_rejects_path_escape(
 # ---------------------------------------------------------------------------
 
 
+def _r2_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("R2_ACCOUNT_ID", "acc")
+    monkeypatch.setenv("R2_ACCESS_KEY_ID", "key")
+    monkeypatch.setenv("R2_SECRET_ACCESS_KEY", "secret")
+    monkeypatch.setenv("R2_BUCKET_NAME", "bucket")
+
+
+def _local_path_for(fake_library: Path, media_url: str) -> Path:
+    rel = media_url.removeprefix("/api/media/").split("?", 1)[0]
+    return fake_library / rel
+
+
 @pytest.mark.integration
 def test_api_media_redirects_to_r2_presigned(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path
 ) -> None:
     """R2 path returns 302 → presigned URL so bytes never traverse Railway."""
-    monkeypatch.setenv("R2_ACCOUNT_ID", "acc")
-    monkeypatch.setenv("R2_ACCESS_KEY_ID", "key")
-    monkeypatch.setenv("R2_SECRET_ACCESS_KEY", "secret")
-    monkeypatch.setenv("R2_BUCKET_NAME", "bucket")
+    _r2_env(monkeypatch)
 
     presigned_url = (
         "https://acc.r2.cloudflarestorage.com/bucket/alice/1001_1.jpg"
@@ -208,26 +217,88 @@ def test_api_media_redirects_to_r2_presigned(
 
     posts = client.get("/api/posts").json()["items"]
     media_url = posts[0]["media_url"]
+    # Production state after a sync: the local copy is deleted once uploaded.
+    _local_path_for(fake_library, media_url).unlink()
     r = client.get(media_url, follow_redirects=False)
 
     assert r.status_code == 302
     assert r.headers["location"] == presigned_url
     # `private` (not `public`) so CF edge does NOT cache the 302.
     assert r.headers["cache-control"] == "private, max-age=300"
-    # ETag preserved so the next request can short-circuit at 304.
-    assert r.headers.get("etag")
     mock_r2.generate_presigned_get_url.assert_called_once()
+
+
+@pytest.mark.integration
+def test_api_media_redirect_carries_no_etag(
+    monkeypatch: pytest.MonkeyPatch, fake_library: Path
+) -> None:
+    """The 302 must not be conditionally cacheable.
+
+    Regression: it used to carry an ETag, and the matching 304 answered with
+    ``immutable``. A 304's headers replace the stored response's (RFC 9111
+    §4.3.4), so the cached redirect was promoted to "valid for a year, never
+    revalidate" and the browser kept replaying a presigned URL long past its
+    600s signature TTL — R2 then returned 403 for that image forever, since the
+    ETag is derived from rel_path alone and never changes. (2026-07-29)
+    """
+    _r2_env(monkeypatch)
+    mock_r2 = MagicMock()
+    mock_r2.generate_presigned_get_url.return_value = "https://example/signed"
+
+    with patch("favgallery.server.R2Client", return_value=mock_r2):
+        app = create_app(library_root=fake_library, scan_in_background=False)
+    client = TestClient(app)
+
+    posts = client.get("/api/posts").json()["items"]
+    media_url = posts[0]["media_url"]
+    _local_path_for(fake_library, media_url).unlink()
+
+    first = client.get(media_url, follow_redirects=False)
+    assert first.status_code == 302
+    assert first.headers.get("etag") is None
+
+    # Even if a client replays a stale validator, it must get a fresh redirect.
+    mock_r2.generate_presigned_get_url.reset_mock()
+    again = client.get(
+        media_url, headers={"If-None-Match": 'W/"whatever"'}, follow_redirects=False
+    )
+    assert again.status_code == 302
+    assert again.headers["cache-control"] == "private, max-age=300"
+    mock_r2.generate_presigned_get_url.assert_called_once()
+
+
+@pytest.mark.integration
+def test_api_media_prefers_local_file_over_presign(
+    monkeypatch: pytest.MonkeyPatch, fake_library: Path
+) -> None:
+    """A file still on disk is served directly, never presigned.
+
+    "Like & save" writes locally and only uploads on the next sync; presigning a
+    key that isn't in the bucket sent the browser to a NoSuchKey 404, because
+    presign never checks existence. (2026-07-29)
+    """
+    _r2_env(monkeypatch)
+    mock_r2 = MagicMock()
+    mock_r2.generate_presigned_get_url.return_value = "https://example/signed"
+
+    with patch("favgallery.server.R2Client", return_value=mock_r2):
+        app = create_app(library_root=fake_library, scan_in_background=False)
+    client = TestClient(app)
+
+    posts = client.get("/api/posts").json()["items"]
+    media_url = posts[0]["media_url"]
+    r = client.get(media_url, follow_redirects=False)
+
+    assert r.status_code == 200
+    mock_r2.generate_presigned_get_url.assert_not_called()
 
 
 @pytest.mark.integration
 def test_api_media_falls_back_to_local_when_r2_raises(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path
 ) -> None:
-    """If presigned issuance raises, fall back to local filesystem (200)."""
-    monkeypatch.setenv("R2_ACCOUNT_ID", "acc")
-    monkeypatch.setenv("R2_ACCESS_KEY_ID", "key")
-    monkeypatch.setenv("R2_SECRET_ACCESS_KEY", "secret")
-    monkeypatch.setenv("R2_BUCKET_NAME", "bucket")
+    """If presigned issuance raises and no local copy exists, answer 404."""
+    _r2_env(monkeypatch)
 
     mock_r2 = MagicMock()
     mock_r2.generate_presigned_get_url.side_effect = Exception("AccessDenied")
@@ -238,23 +309,20 @@ def test_api_media_falls_back_to_local_when_r2_raises(
 
     posts = client.get("/api/posts").json()["items"]
     media_url = posts[0]["media_url"]
-    r = client.get(media_url)
-    # Local file exists, so fallback must succeed.
-    assert r.status_code == 200
+    # Local copy present → served locally without touching R2.
+    assert client.get(media_url).status_code == 200
+
+    _local_path_for(fake_library, media_url).unlink()
+    assert client.get(media_url).status_code == 404
 
 
 @pytest.mark.integration
-def test_api_media_304_short_circuit_skips_r2_call(
+def test_api_media_local_file_still_supports_304(
     monkeypatch: pytest.MonkeyPatch, fake_library: Path
 ) -> None:
-    """If-None-Match short-circuit must NOT issue a presigned URL (strongest opt)."""
-    monkeypatch.setenv("R2_ACCOUNT_ID", "acc")
-    monkeypatch.setenv("R2_ACCESS_KEY_ID", "key")
-    monkeypatch.setenv("R2_SECRET_ACCESS_KEY", "secret")
-    monkeypatch.setenv("R2_BUCKET_NAME", "bucket")
-
+    """Local bytes are immutable per rel_path, so validation still short-circuits."""
+    _r2_env(monkeypatch)
     mock_r2 = MagicMock()
-    mock_r2.generate_presigned_get_url.return_value = "https://example/signed"
 
     with patch("favgallery.server.R2Client", return_value=mock_r2):
         app = create_app(library_root=fake_library, scan_in_background=False)
@@ -262,12 +330,9 @@ def test_api_media_304_short_circuit_skips_r2_call(
 
     posts = client.get("/api/posts").json()["items"]
     media_url = posts[0]["media_url"]
-    # First request: pick up the ETag.
     first = client.get(media_url, follow_redirects=False)
+    assert first.status_code == 200
     etag = first.headers["etag"]
-
-    # Reset the mock so the assert below is unambiguous.
-    mock_r2.generate_presigned_get_url.reset_mock()
 
     r = client.get(media_url, headers={"If-None-Match": etag}, follow_redirects=False)
     assert r.status_code == 304

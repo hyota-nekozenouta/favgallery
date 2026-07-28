@@ -30,10 +30,17 @@ def is_media_file(path: Path) -> bool:
 def iter_media_keys(library_root: Path) -> Iterator[tuple[Path, str]]:
     """Yield ``(media_path, r2_key)`` for every uploadable media file under root.
 
-    Skips non-files, non-media extensions, and anything under a ``thumbs/``
-    subdirectory. The key is the library-relative POSIX path (see
-    :func:`r2_key_for_path`). Centralises the filter that the three sync sweeps
-    (full upload, on-demand cleanup, streaming upload) previously duplicated.
+    Skips non-files, non-media extensions, anything under a ``thumbs/``
+    subdirectory, and anything under a dot-prefixed directory. The key is the
+    library-relative POSIX path (see :func:`r2_key_for_path`). Centralises the
+    filter that the three sync sweeps (full upload, on-demand cleanup,
+    streaming upload) previously duplicated.
+
+    The dot-directory rule is deny-by-default on purpose: these sweeps **upload
+    and then delete** what they yield, so any internal working directory that
+    happens to contain ``.jpg`` files (e.g. a thumbnail cache) would be shipped
+    to R2 and wiped. ``dedup.py`` already carried its own ``.thumb-cache``
+    guard; the rule belongs here, where the sweeps actually read it.
     """
     for media_path in library_root.rglob("*"):
         if not media_path.is_file():
@@ -41,6 +48,9 @@ def iter_media_keys(library_root: Path) -> Iterator[tuple[Path, str]]:
         if not is_media_file(media_path):
             continue
         rel = media_path.relative_to(library_root)
-        if "thumbs" in rel.parts[:-1]:
+        dirs = rel.parts[:-1]
+        if "thumbs" in dirs:
+            continue
+        if any(part.startswith(".") for part in dirs):
             continue
         yield media_path, rel.as_posix()

@@ -140,6 +140,14 @@ function _captureVideoFrame(src, imgEl) {
   const v = document.createElement('video');
   v.muted = true;
   v.preload = 'metadata';
+  // /api/media は R2 の presigned URL へ 302 する = 別オリジン。crossOrigin を
+  // 付けずに描画した canvas は汚染され toDataURL() が SecurityError になるため、
+  // CORS 付きで取得する（src 代入より前に設定する必要がある）。R2 バケット側にも
+  // このオリジンからの GET を許可する CORS 設定が要る。
+  v.crossOrigin = 'anonymous';
+  // 取得できなくても「透明なタイル」にしない。プレースホルダを必ず見せる。
+  const giveUp = () => imgEl.classList.add('loaded');
+  v.addEventListener('error', giveUp, { once: true });
   v.addEventListener('loadeddata', () => { v.currentTime = 0; }, { once: true });
   v.addEventListener('seeked', () => {
     try {
@@ -148,7 +156,9 @@ function _captureVideoFrame(src, imgEl) {
       c.height = v.videoHeight || 360;
       c.getContext('2d').drawImage(v, 0, 0);
       imgEl.src = c.toDataURL('image/jpeg', 0.85);
-    } catch { /* keep blank */ }
+    } catch {
+      giveUp();     // tainted canvas 等。黒プレースホルダ + ▶ を見せる
+    }
     v.removeAttribute('src');
     v.load();
   }, { once: true });
@@ -638,15 +648,17 @@ function tileHtml(p, idx) {
   const thumbSrc = `${p.thumb_url}${p.thumb_url.includes('?') ? '&' : '?'}size=600`;
   const dims = (p.width && p.height) ? ` width="${p.width}" height="${p.height}"` : '';
   const media = isVideo
-    ? `<img src="" alt="" data-video-src="${p.media_url}"${dims} style="background:#111;min-height:80px" />`
+    ? `<img src="" alt="" class="video-poster" data-video-src="${p.media_url}"${dims} style="background:#111;min-height:80px" />`
     : `<img src="${thumbSrc}" loading="lazy" decoding="async" alt=""${dims} />`;
   // 削除はタイルには出さない（画像を開いた時＝ライトボックスでのみ）。
   const sideBtn = state.tab === 'timeline'
     ? `<div class="like-btn" title="X でいいね + 保存">${icon('heart')}</div>`
     : '';
   const favBtn = favBtnHtml(p);
+  const playBadge = isVideo ? `<div class="play-badge" aria-hidden="true">${icon('play')}</div>` : '';
   return `<div class="tile cursor-pointer" data-idx="${idx}">
     ${media}
+    ${playBadge}
     ${sideBtn}
     ${favBtn}
     <div class="info">
@@ -660,7 +672,7 @@ function reelItemHtml(p, idx, isSeenBoundary = false) {
   const isVideo = p.media_type === 'video' || p.extension === 'mp4';
   const thumbSrc = `${p.thumb_url}${p.thumb_url.includes('?') ? '&' : '?'}size=600`;
   const media = isVideo
-    ? `<img src="" alt="" class="reel-poster" data-video-src="${p.media_url}" />
+    ? `<img src="" alt="" class="reel-poster video-poster" data-video-src="${p.media_url}" />
        <video data-src="${p.media_url}" preload="none" muted loop playsinline class="reel-media"></video>`
     : `<img src="${p.media_url}" loading="lazy" decoding="async" alt="" />`;
   const sideBtn = state.tab === 'timeline'

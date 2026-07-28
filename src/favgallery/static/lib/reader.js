@@ -7,6 +7,11 @@ import { showNotice } from 'notices';
 
 state.reader = { bookId: null, pages: [], pos: 0 };
 
+// /api/media のキャッシュ破棄トークン。サーバ側 payloads.py の MEDIA_URL_VERSION と
+// 揃える（期限切れ presigned URL を1年間掴み続けたブラウザを救済するため）。
+const MEDIA_V = 'v=2';
+const mediaUrl = (rel) => `/api/media/${rel}?${MEDIA_V}`;
+
 // Warm the browser cache for upcoming pages so navigation feels instant.
 // Pages are served with immutable cache headers, so a warmed image is reused on real nav.
 const _prefetchCache = new Set();
@@ -23,7 +28,7 @@ function prefetchPageImages(startPos, count, direction) {
     if (_prefetchCache.has(rel)) continue;
     _prefetchCache.add(rel);
     const im = new Image();
-    im.src = `/api/media/${rel}`;
+    im.src = mediaUrl(rel);
   }
 }
 
@@ -133,7 +138,7 @@ function paintPanes() {
   const { pages, pos } = state.reader;
   const imgs = _readerTrackEl()?.querySelectorAll('img[data-slot]');
   if (!imgs) return;
-  const srcFor = (i) => (i >= 0 && i < pages.length) ? `/api/media/${pages[i].rel_path}` : '';
+  const srcFor = (i) => (i >= 0 && i < pages.length) ? mediaUrl(pages[i].rel_path) : '';
   const map = [pos + 1, pos, pos - 1];
   imgs.forEach((img, slot) => {
     const want = srcFor(map[slot]);

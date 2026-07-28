@@ -48,3 +48,23 @@ def test_iter_media_keys_filters_sidecars_and_thumbs(tmp_path: Path) -> None:
 
     found = {key for _path, key in iter_media_keys(lib)}
     assert found == {"alice/1.jpg"}
+
+
+@pytest.mark.unit
+def test_iter_media_keys_skips_dot_directories(tmp_path: Path) -> None:
+    """Dot-directories must never be swept.
+
+    The sync sweeps upload AND delete whatever this yields, so a working
+    directory full of .jpg files (the thumbnail cache) would be shipped to R2
+    and wiped on every sync. (2026-07-29)
+    """
+    lib = tmp_path / "lib"
+    (lib / "alice").mkdir(parents=True)
+    (lib / "alice" / "1.jpg").write_bytes(b"x")
+    (lib / ".thumb-cache" / "ab").mkdir(parents=True)
+    (lib / ".thumb-cache" / "ab" / "deadbeef.jpg").write_bytes(b"x")
+    (lib / ".hidden").mkdir()
+    (lib / ".hidden" / "x.png").write_bytes(b"x")
+
+    found = {key for _path, key in iter_media_keys(lib)}
+    assert found == {"alice/1.jpg"}
