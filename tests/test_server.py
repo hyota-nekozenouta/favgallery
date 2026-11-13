@@ -793,7 +793,7 @@ def test_prebuilt_css_served_with_long_cache(client: TestClient) -> None:
     lib/*.js も同方針 (test_lib_js_module_served_with_long_cache 参照)。"""
     r = client.get("/static/style.css")
     assert r.status_code == 200
-    assert r.headers.get("Cache-Control") == "public, max-age=31536000, immutable"
+    assert r.headers.get("Cache-Control") == "private, max-age=31536000, immutable"
 
 
 @pytest.mark.integration
@@ -830,7 +830,7 @@ def test_lib_js_module_served_with_long_cache(client: TestClient) -> None:
     import map で構造的に再発しない."""
     r = client.get("/static/lib/main.js")
     assert r.status_code == 200
-    assert r.headers.get("Cache-Control") == "public, max-age=31536000, immutable"
+    assert r.headers.get("Cache-Control") == "private, max-age=31536000, immutable"
 
 
 @pytest.mark.integration
@@ -960,7 +960,7 @@ def test_pwa_icons_long_cached(client: TestClient) -> None:
     """icons/*.png は ?v= 付き参照なので style.css / lib/*.js と同じ immutable 長期キャッシュ。"""
     r = client.get("/static/icons/icon-192.png")
     assert r.status_code == 200
-    assert r.headers.get("Cache-Control") == "public, max-age=31536000, immutable"
+    assert r.headers.get("Cache-Control") == "private, max-age=31536000, immutable"
 
 
 @pytest.mark.integration

@@ -244,7 +244,9 @@ def _register_http_shell_middleware(app: FastAPI) -> None:
                 or path.startswith("/static/icons/")
             )
             if is_versioned_asset and ok:
-                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+                # private: /static も認証の内側なので、共有キャッシュ
+                # (Cloudflare) に置かせない (audit S-1, 2026-11-13)。
+                response.headers["Cache-Control"] = "private, max-age=31536000, immutable"
             else:
                 response.headers["Cache-Control"] = "no-cache"
         return response

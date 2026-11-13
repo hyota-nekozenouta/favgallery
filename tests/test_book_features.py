@@ -98,3 +98,54 @@ def test_thumb_cache_headers_and_304(client: TestClient) -> None:
 
     t2 = client.get(f"/thumb/{rel}", params={"size": 200}, headers={"If-None-Match": etag})
     assert t2.status_code == 304
+
+
+def _assert_private(resp) -> None:
+    cc = resp.headers.get("cache-control", "")
+    directives = {d.strip() for d in cc.split(",")}
+    assert "private" in directives, cc
+    assert "public" not in directives, cc
+
+
+@pytest.mark.integration
+def test_authed_media_is_never_publicly_cacheable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """audit S-1: auth-gated media must not be storable by a shared cache.
+
+    `public` lets Cloudflare's edge keep a logged-in response and hand it to
+    callers without credentials. Covers 200 and 304 on /api/media, /media and
+    /thumb with auth switched on.
+    """
+    monkeypatch.setenv("FAVGALLERY_USER", "u")
+    monkeypatch.setenv("FAVGALLERY_PASSWORD", "p")
+    lib = tmp_path / "library"
+    lib.mkdir()
+    authed = TestClient(create_app(library_root=lib, scan_in_background=False))
+    authed.auth = ("u", "p")
+
+    r = _upload_book(authed, "A", [1, 2, 3, 4, 5])
+    assert r.status_code == 201
+    rel = authed.get(f"/api/books/{r.json()['id']}").json()["pages"][0]["rel_path"]
+
+    # /media is a plain FileResponse without its own 304 path, so only the
+    # routes that answer conditional requests are checked for the 304 header.
+    for url, params, has_304 in (
+        (f"/api/media/{rel}", {}, True),
+        (f"/media/{rel}", {}, False),
+        (f"/thumb/{rel}", {"size": 200}, True),
+    ):
+        ok = authed.get(url, params=params)
+        assert ok.status_code == 200, url
+        _assert_private(ok)
+        if has_304:
+            etag = ok.headers.get("etag")
+            assert etag, url
+            again = authed.get(url, params=params, headers={"If-None-Match": etag})
+            assert again.status_code == 304, url
+            _assert_private(again)
+
+    # Without credentials the same URL is refused, not served from a cache key.
+    anon = TestClient(authed.app)
+    anon.auth = None
+    assert anon.get(f"/thumb/{rel}", params={"size": 200}).status_code == 401

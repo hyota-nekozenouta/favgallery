@@ -78,7 +78,11 @@ class AppContext:
     book_import_queue: Any = None
 
     # --- constants ----------------------------------------------------------
-    immutable_cache: str = "public, max-age=31536000, immutable"
+    # Every route sits behind the Basic-auth middleware, so long-lived caching
+    # must stay in the browser only. `public` would let a shared cache
+    # (Cloudflare's edge) store a logged-in user's media and replay it to
+    # anyone without credentials (audit S-1, 2026-11-13).
+    immutable_cache: str = "private, max-age=31536000, immutable"
 
     # --- index helpers ------------------------------------------------------
     def get_index(self) -> Index:
