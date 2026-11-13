@@ -774,6 +774,78 @@ def test_like_and_save_records_my_like(
 
 
 @pytest.mark.integration
+def test_like_and_save_waits_out_a_running_sync(
+    monkeypatch: pytest.MonkeyPatch, fake_library: Path
+) -> None:
+    """audit B-12: while a sync holds gdl_lock, like-and-save must not touch
+    gallery-dl's global config. It answers 409 "busy" without liking or saving."""
+    from favgallery.routers import timeline as timeline_router
+
+    calls: list[str] = []
+    monkeypatch.setattr(timeline_router, "_GDL_LOCK_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(
+        "favgallery.routers.timeline.like_tweet",
+        lambda *_a, **_kw: calls.append("like"),
+    )
+    monkeypatch.setattr(
+        "favgallery.routers.timeline.save_tweet",
+        lambda *_a, **_kw: calls.append("save"),
+    )
+    app = create_app(library_root=fake_library, scan_in_background=False)
+    client = TestClient(app)
+    ctx = app.state.context  # type: ignore[attr-defined]
+
+    assert ctx.gdl_lock.acquire(timeout=1)  # stands in for a running sync
+    try:
+        r = client.post(
+            "/api/timeline/like-and-save",
+            json={"tweet_id": "12345", "author_name": "alice"},
+        )
+    finally:
+        ctx.gdl_lock.release()
+
+    assert r.status_code == 409
+    body = r.json()
+    assert body["busy"] is True
+    assert body["liked"] is False
+    assert body["saved"] is False
+    assert body["like_message"]
+    assert calls == []
+    assert "12345" not in app.state.db.my_likes_ids()  # type: ignore[attr-defined]
+
+
+@pytest.mark.integration
+def test_like_and_save_holds_gdl_lock_while_saving(
+    monkeypatch: pytest.MonkeyPatch, fake_library: Path
+) -> None:
+    """audit B-12: save_tweet runs under gdl_lock, and the lock is released after."""
+    from favgallery import like as like_module
+    from favgallery import save_one as save_module
+
+    app = create_app(library_root=fake_library, scan_in_background=False)
+    ctx = app.state.context  # type: ignore[attr-defined]
+    seen: dict[str, bool] = {}
+
+    def fake_save(*_a: object, **_kw: object) -> save_module.SaveResult:
+        seen["locked_during_save"] = ctx.gdl_lock.locked()
+        return save_module.SaveResult(ok=False, return_code=1, message="x")
+
+    monkeypatch.setattr(
+        "favgallery.routers.timeline.like_tweet",
+        lambda *_a, **_kw: like_module.LikeResult(ok=True, status_code=200, message="ok"),
+    )
+    monkeypatch.setattr("favgallery.routers.timeline.save_tweet", fake_save)
+    r = TestClient(app).post(
+        "/api/timeline/like-and-save",
+        json={"tweet_id": "777", "author_name": "alice"},
+    )
+    assert r.status_code == 200
+    assert r.json()["liked"] is True
+    assert seen == {"locked_during_save": True}
+    assert not ctx.gdl_lock.locked()
+
+
+@pytest.mark.integration
 def test_media_and_thumb_etags_are_strong(client: TestClient) -> None:
     """immutable メディアの ETag は strong (W/ なし) — ブラウザキャッシュ強化
     (perf Phase 1 / 2026-06-10)。304 round-trip も維持。"""

@@ -14,6 +14,7 @@ from favgallery.context import AppContext, get_context
 from favgallery.like import like_tweet
 from favgallery.payloads import _timeline_payload
 from favgallery.proxy import is_allowed
+from favgallery.routers.cookies import _GDL_LOCK_TIMEOUT_S, _MSG_BUSY
 from favgallery.save_one import save_tweet
 
 router = APIRouter()
@@ -101,20 +102,41 @@ def timeline_set_last_seen(
 def timeline_like_and_save(
     body: _LikeAndSaveBody, ctx: AppContext = Depends(get_context)
 ) -> JSONResponse:
-    like_result = like_tweet(ctx.cookies_file, body.tweet_id)
-    save_result = None
-    if like_result.ok:
-        # Record it in the my_likes cache so the "未いいね" filter hides this
-        # tweet on subsequent fetches even if save_tweet fails.
-        ctx.db.upsert_my_likes([body.tweet_id])
-        save_result = save_tweet(
-            ctx.gallerydl_config_path,
-            author_name=body.author_name,
-            tweet_id=body.tweet_id,
+    # save_tweet -> prepare_config clears and rewrites gallery-dl's process-wide
+    # config. A running sync / timeline refresh holds gdl_lock for minutes while
+    # its gallery-dl job reads that config, so saving without the lock could
+    # swap its download path, filenames and cookies mid-run (audit B-12).
+    # Take the lock with a short timeout (same as the cookie probe) BEFORE
+    # liking, so a busy answer never leaves a "liked but not saved" tweet.
+    if not ctx.gdl_lock.acquire(timeout=_GDL_LOCK_TIMEOUT_S):
+        return JSONResponse(
+            {
+                "liked": False,
+                "like_status": 409,
+                "like_message": _MSG_BUSY,
+                "saved": False,
+                "save_message": "",
+                "busy": True,
+            },
+            status_code=409,
         )
-        if save_result.ok:
-            # Refresh the in-memory index so the new file appears in /api/posts.
-            ctx.refresh_index()
+    try:
+        like_result = like_tweet(ctx.cookies_file, body.tweet_id)
+        save_result = None
+        if like_result.ok:
+            # Record it in the my_likes cache so the "未いいね" filter hides this
+            # tweet on subsequent fetches even if save_tweet fails.
+            ctx.db.upsert_my_likes([body.tweet_id])
+            save_result = save_tweet(
+                ctx.gallerydl_config_path,
+                author_name=body.author_name,
+                tweet_id=body.tweet_id,
+            )
+    finally:
+        ctx.gdl_lock.release()
+    if save_result is not None and save_result.ok:
+        # Refresh the in-memory index so the new file appears in /api/posts.
+        ctx.refresh_index()
     return JSONResponse(
         {
             "liked": like_result.ok,
