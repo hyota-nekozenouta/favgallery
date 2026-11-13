@@ -713,13 +713,11 @@ def test_legacy_cookies_migrated_into_library_root(
 
 @pytest.mark.integration
 def test_ensure_gallerydl_config_written_in_nonportable_env(
-    monkeypatch: pytest.MonkeyPatch, fake_library: Path, tmp_path: Path
+    fake_library: Path, tmp_path: Path
 ) -> None:
-    """_ensure_gallerydl_config writes gallery-dl.json when portable_root() is None (Railway)."""
-    from favgallery import server as server_module
+    """_ensure_gallerydl_config writes gallery-dl.json (Railway / server layout)."""
     from favgallery.server import _ensure_gallerydl_config
 
-    monkeypatch.setattr(server_module, "portable_root", lambda: None)
     config_path = tmp_path / "config" / "gallery-dl.json"
     _ensure_gallerydl_config(config_path, fake_library)
 
@@ -738,8 +736,7 @@ def test_ensure_gallerydl_config_written_in_nonportable_env(
 def test_gallerydl_config_path_is_under_data_in_nonportable_env(
     fake_library: Path
 ) -> None:
-    """Non-frozen env (Railway-equivalent): gallery-dl.json sits at library_root.parent/config/."""
-    # portable_root() naturally returns None in the test environment (not frozen).
+    """Railway / server layout: gallery-dl.json sits at library_root.parent/config/."""
     app = create_app(library_root=fake_library, scan_in_background=False)
     cfg_path: Path = app.state.timeline_refresher.gallerydl_config_path  # type: ignore[attr-defined]
     assert cfg_path == fake_library.parent / "config" / "gallery-dl.json"

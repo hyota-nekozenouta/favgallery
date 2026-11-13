@@ -12,8 +12,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from favgallery.paths import portable_root
-
 
 def _fwd(p: Path) -> str:
     """Forward-slash a path (gallery-dl wants POSIX-style paths on Windows too)."""
@@ -55,18 +53,14 @@ def build_sync_config(library_root: Path, ffmpeg_location: str) -> dict:
 
 
 def _resolve_ffmpeg_location(library_root: Path) -> str:
-    """Portable bundle: prefer the bundled ffmpeg.exe; Railway: rely on PATH."""
-    if portable_root() is not None:
-        bundle_root = library_root.parent.parent
-        ffmpeg_exe = bundle_root / "ffmpeg" / "bin" / "ffmpeg.exe"
-        return _fwd(ffmpeg_exe) if ffmpeg_exe.exists() else "ffmpeg"
+    """ffmpeg is resolved from PATH (Railway image / local install)."""
     return "ffmpeg"
 
 
 def write_gallerydl_config(config_path: Path, library_root: Path) -> None:
     """Write gallery-dl.json with current absolute paths (idempotent).
 
-    Called at startup so moving the portable folder to another PC automatically
+    Called at startup so a moved library folder automatically
     fixes stale paths (cookies, ffmpeg, base-directory, archive). No-op when the
     file already matches the desired config.
     """

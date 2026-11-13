@@ -22,7 +22,6 @@ from favgallery.context import AppContext
 from favgallery.db import Database
 from favgallery.dedup import DedupRunner, VisualDedupRunner
 from favgallery.gallerydl_config import write_gallerydl_config
-from favgallery.paths import portable_root
 from favgallery.proxy import CdnProxy
 from favgallery.r2 import R2Client, r2_config_from_env
 from favgallery.routers import admin as admin_router
@@ -347,11 +346,7 @@ def create_app(
         r2_client = R2Client(r2_cfg) if r2_cfg is not None else None
     app.state.r2_client = r2_client
     cdn_proxy = CdnProxy(cookies_file)
-    gallerydl_config_path = (
-        library_root.parent.parent / "config" / "gallery-dl.json"
-        if portable_root() is not None
-        else library_root.parent / "config" / "gallery-dl.json"
-    )
+    gallerydl_config_path = library_root.parent / "config" / "gallery-dl.json"
     _ensure_gallerydl_config(gallerydl_config_path, library_root)
     # Serialize gallery-dl invocations: prepare_config touches global state.
     # Shared by SyncRunner, TimelineRefresher, and the unliked author fetch so

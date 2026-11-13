@@ -1,32 +1,17 @@
-"""favgallery CLI: launch the local web app inside a desktop window."""
+"""favgallery CLI: run the local web app and open it in the system browser."""
 
 from __future__ import annotations
 
 import argparse
-import io
-import os
 import socket
-import sys
 import threading
 import time
 from collections.abc import Sequence
 
+import uvicorn
 
-def _ensure_stdio() -> None:
-    """When PyInstaller is built --windowed, stdout/stderr can be None; uvicorn's
-    logger then crashes on the first emit. Substitute /dev/null streams."""
-    if sys.stdout is None:
-        sys.stdout = io.TextIOWrapper(open(os.devnull, "wb"), encoding="utf-8")  # noqa: SIM115
-    if sys.stderr is None:
-        sys.stderr = io.TextIOWrapper(open(os.devnull, "wb"), encoding="utf-8")  # noqa: SIM115
-
-
-_ensure_stdio()
-
-import uvicorn  # noqa: E402
-
-from favgallery.paths import default_library_root  # noqa: E402
-from favgallery.server import create_app  # noqa: E402
+from favgallery.paths import default_library_root
+from favgallery.server import create_app
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -38,14 +23,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--port", type=int, default=8766, help="Port to listen on (default: 8766).")
     p.add_argument("--library", type=str, default=str(default_library_root()))
     p.add_argument(
-        "--window",
-        action="store_true",
-        help="Open in a desktop window (pywebview) instead of the system browser.",
-    )
-    p.add_argument(
         "--no-window",
         action="store_true",
-        help="Headless: only run the local server, don't open any window.",
+        help="Headless: only run the local server, don't open the browser.",
     )
     p.add_argument(
         "--auto-sync",
@@ -103,24 +83,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not _wait_for_server(args.host, port, timeout=15):
         print(f"Server did not come up on {url}")
         return 2
-
-    if args.window:
-        # Desktop window — pywebview wraps Edge WebView2 on Windows.
-        import webview
-
-        webview.create_window(
-            "FavGallery",
-            url,
-            width=1400,
-            height=900,
-            maximized=True,
-        )
-        webview.start()
-
-        # When the window closes, shut the server down too.
-        server.should_exit = True
-        server_thread.join(timeout=3)
-        return 0
 
     # Default: open in the system browser, keep server running until Ctrl+C.
     import webbrowser
