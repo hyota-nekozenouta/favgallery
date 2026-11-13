@@ -16,6 +16,7 @@ from tests.conftest import _write_post
 # Basic auth tests
 # ---------------------------------------------------------------------------
 
+
 def _basic_header(user: str, password: str) -> str:
     token = base64.b64encode(f"{user}:{password}".encode()).decode()
     return f"Basic {token}"
@@ -242,9 +243,7 @@ def test_posts_sort_old_reverses_default_order_and_preserves_pagination(
 ) -> None:
     default_page = client.get("/api/posts", params={"limit": 2, "offset": 0})
     old_page = client.get("/api/posts", params={"sort": "old", "limit": 2, "offset": 0})
-    old_next_page = client.get(
-        "/api/posts", params={"sort": "old", "limit": 2, "offset": 2}
-    )
+    old_next_page = client.get("/api/posts", params={"sort": "old", "limit": 2, "offset": 2})
     default_after_old = client.get("/api/posts", params={"limit": 2, "offset": 0})
 
     assert (
@@ -419,12 +418,22 @@ def test_author_unliked_filters_local_archive(
 
     def make(tweet_id: str) -> TimelinePost:
         return TimelinePost(
-            tweet_id=tweet_id, num=1, fetched_at=0, date="2026-01-01 00:00:00",
-            author_name="alice", author_nick="アリス", author_avatar_url="",
-            content="x", media_url=f"https://pbs.twimg.com/media/{tweet_id}.jpg",
+            tweet_id=tweet_id,
+            num=1,
+            fetched_at=0,
+            date="2026-01-01 00:00:00",
+            author_name="alice",
+            author_nick="アリス",
+            author_avatar_url="",
+            content="x",
+            media_url=f"https://pbs.twimg.com/media/{tweet_id}.jpg",
             thumb_url=f"https://pbs.twimg.com/media/{tweet_id}.jpg?name=small",
-            media_type="photo", width=100, height=100,
-            favorite_count=0, view_count=0, hashtags=(),
+            media_type="photo",
+            width=100,
+            height=100,
+            favorite_count=0,
+            view_count=0,
+            hashtags=(),
         )
 
     # tweet_id 1001 already exists in fake_library; 9999 is brand new.
@@ -470,17 +479,27 @@ def test_author_unliked_filters_x_side_favorited(
 
     def make(tweet_id: str, *, favorited: bool) -> TimelinePost:
         return TimelinePost(
-            tweet_id=tweet_id, num=1, fetched_at=0, date="2026-01-01 00:00:00",
-            author_name="alice", author_nick="アリス", author_avatar_url="",
-            content="x", media_url=f"https://pbs.twimg.com/media/{tweet_id}.jpg",
+            tweet_id=tweet_id,
+            num=1,
+            fetched_at=0,
+            date="2026-01-01 00:00:00",
+            author_name="alice",
+            author_nick="アリス",
+            author_avatar_url="",
+            content="x",
+            media_url=f"https://pbs.twimg.com/media/{tweet_id}.jpg",
             thumb_url=f"https://pbs.twimg.com/media/{tweet_id}.jpg?name=small",
-            media_type="photo", width=100, height=100,
-            favorite_count=0, view_count=0, hashtags=(),
+            media_type="photo",
+            width=100,
+            height=100,
+            favorite_count=0,
+            view_count=0,
+            hashtags=(),
             favorited=favorited,
         )
 
     fake_posts = [
-        make("8001", favorited=True),   # already liked on X — filter out
+        make("8001", favorited=True),  # already liked on X — filter out
         make("8002", favorited=False),  # truly unliked — keep
     ]
 
@@ -526,12 +545,22 @@ def test_timeline_by_tweet_returns_all_nums_in_order(client: TestClient) -> None
 
     def post(num: int) -> TimelinePost:
         return TimelinePost(
-            tweet_id="7777", num=num, fetched_at=0, date="2026-01-01 00:00:00",
-            author_name="alice", author_nick="アリス", author_avatar_url="",
-            content="multi", media_url=f"https://pbs.twimg.com/media/7777_{num}.jpg",
+            tweet_id="7777",
+            num=num,
+            fetched_at=0,
+            date="2026-01-01 00:00:00",
+            author_name="alice",
+            author_nick="アリス",
+            author_avatar_url="",
+            content="multi",
+            media_url=f"https://pbs.twimg.com/media/7777_{num}.jpg",
             thumb_url=f"https://pbs.twimg.com/media/7777_{num}.jpg?name=small",
-            media_type="photo", width=100, height=100,
-            favorite_count=0, view_count=0, hashtags=(),
+            media_type="photo",
+            width=100,
+            height=100,
+            favorite_count=0,
+            view_count=0,
+            hashtags=(),
         )
 
     db = client.app.state.db  # type: ignore[attr-defined]
@@ -579,19 +608,27 @@ def test_me_likes_sync_requires_username(client: TestClient) -> None:
 
 
 @pytest.mark.integration
-def test_unliked_filters_out_my_likes(
-    monkeypatch: pytest.MonkeyPatch, fake_library: Path
-) -> None:
+def test_unliked_filters_out_my_likes(monkeypatch: pytest.MonkeyPatch, fake_library: Path) -> None:
     from favgallery.db import TimelinePost
 
     def make(tweet_id: str) -> TimelinePost:
         return TimelinePost(
-            tweet_id=tweet_id, num=1, fetched_at=0, date="2026-01-01 00:00:00",
-            author_name="alice", author_nick="アリス", author_avatar_url="",
-            content="x", media_url=f"https://pbs.twimg.com/media/{tweet_id}.jpg",
+            tweet_id=tweet_id,
+            num=1,
+            fetched_at=0,
+            date="2026-01-01 00:00:00",
+            author_name="alice",
+            author_nick="アリス",
+            author_avatar_url="",
+            content="x",
+            media_url=f"https://pbs.twimg.com/media/{tweet_id}.jpg",
             thumb_url=f"https://pbs.twimg.com/media/{tweet_id}.jpg?name=small",
-            media_type="photo", width=100, height=100,
-            favorite_count=0, view_count=0, hashtags=(),
+            media_type="photo",
+            width=100,
+            height=100,
+            favorite_count=0,
+            view_count=0,
+            hashtags=(),
         )
 
     monkeypatch.setattr(
@@ -611,6 +648,7 @@ def test_unliked_filters_out_my_likes(
 # ---------------------------------------------------------------------------
 # GALLERY_DL_COOKIES env var and /api/sync/start cookies check
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 def test_gallery_dl_cookies_env_writes_cookies_file(
@@ -697,9 +735,7 @@ def test_legacy_cookies_migrated_into_library_root(
     monkeypatch.delenv("GALLERY_DL_COOKIES", raising=False)
     legacy = fake_library.parent / "cookies.txt"
     new_path = fake_library / "cookies.txt"
-    legacy.write_text(
-        "# legacy\n.x.com\tTRUE\t/\tTRUE\t0\tauth_token\tTOK\n", encoding="utf-8"
-    )
+    legacy.write_text("# legacy\n.x.com\tTRUE\t/\tTRUE\t0\tauth_token\tTOK\n", encoding="utf-8")
     assert not new_path.exists()
     create_app(library_root=fake_library, scan_in_background=False)
     assert new_path.exists(), "legacy cookie must be migrated into library_root"
@@ -710,6 +746,7 @@ def test_legacy_cookies_migrated_into_library_root(
 # ---------------------------------------------------------------------------
 # gallery-dl.json Railway generation (ENG-106)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.integration
 def test_ensure_gallerydl_config_written_in_nonportable_env(
@@ -733,9 +770,7 @@ def test_ensure_gallerydl_config_written_in_nonportable_env(
 
 
 @pytest.mark.integration
-def test_gallerydl_config_path_is_under_data_in_nonportable_env(
-    fake_library: Path
-) -> None:
+def test_gallerydl_config_path_is_under_data_in_nonportable_env(fake_library: Path) -> None:
     """Railway / server layout: gallery-dl.json sits at library_root.parent/config/."""
     app = create_app(library_root=fake_library, scan_in_background=False)
     cfg_path: Path = app.state.timeline_refresher.gallerydl_config_path  # type: ignore[attr-defined]
@@ -744,9 +779,7 @@ def test_gallerydl_config_path_is_under_data_in_nonportable_env(
 
 
 @pytest.mark.integration
-def test_like_and_save_records_my_like(
-    monkeypatch: pytest.MonkeyPatch, fake_library: Path
-) -> None:
+def test_like_and_save_records_my_like(monkeypatch: pytest.MonkeyPatch, fake_library: Path) -> None:
     from favgallery import like as like_module
     from favgallery import save_one as save_module
 

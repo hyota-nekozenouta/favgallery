@@ -352,9 +352,7 @@ def create_app(
     # Shared by SyncRunner, TimelineRefresher, and the unliked author fetch so
     # concurrent runs don't trample the config or mix captured log lines.
     unliked_lock = threading.Lock()
-    timeline_refresher = TimelineRefresher(
-        db, gallerydl_config_path, gdl_lock=unliked_lock
-    )
+    timeline_refresher = TimelineRefresher(db, gallerydl_config_path, gdl_lock=unliked_lock)
     dedup_runner = DedupRunner(db, library_root)
     visual_dedup_runner = VisualDedupRunner(db, library_root)
     book_index_runner = BookIndexRunner(db, library_root, r2_client)
@@ -387,6 +385,7 @@ def create_app(
                 state["index"] = idx
         except Exception:
             import traceback
+
             traceback.print_exc()
         finally:
             with state_lock:
@@ -507,6 +506,7 @@ def _module_level_app() -> FastAPI:
         library_root = Path(library_root_env)
     else:
         from favgallery.paths import default_library_root
+
         library_root = default_library_root()
     return create_app(library_root=library_root)
 
