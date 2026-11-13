@@ -14,6 +14,9 @@ import { loadLastSeen, setupSeenObserver } from 'timeline';
 import { pollSync } from 'sync';
 import { loadMe } from 'mylikes';
 import { icon } from 'icons';
+// ⚙ のクリック処理は popovers.js がトップレベルで付ける (副作用 import)。
+// c71f2b1 で最後の import が消えて ⚙ が動かなくなっていた (audit B-1)。
+import 'popovers';
 
 // --- Tabs ----------------------------------------------------------
 function switchTab(tab) {

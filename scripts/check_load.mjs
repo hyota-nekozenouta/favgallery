@@ -59,8 +59,13 @@ for (const f of libFiles) {
   let src = readFileSync(join(libDir, f), "utf-8");
   // `from 'spec'` / `import 'spec'` / `export {..} from 'spec'` の bare specifier を相対化
   src = src.replace(/((?:from|import)\s*)(["'])([^"']+)\2/g, rewriteSpec);
+  // 評価の印: モジュール本体が実際に評価されたら名前を記録する。import 宣言は
+  // 巻き上げられるので、先頭に置いても依存の評価順は変わらない。
+  src = `globalThis.__fgEvaluated.add(${JSON.stringify(f)});\n` + src;
   writeFileSync(join(tmp, f), src, "utf-8");
 }
+
+globalThis.__fgEvaluated = new Set();
 
 // 3) ブラウザ global スタブ（万能 Proxy: 呼べる・new できる・任意プロパティで自身を返す）
 const U = new Proxy(function stub() {}, {
@@ -132,9 +137,30 @@ for (const e of asyncErrors) {
 
 try { rmSync(tmp, { recursive: true, force: true }); } catch {}
 
+// 5) 実際の読み込みを見る (audit B-1): ファイルの数を数えるだけでは、どこからも
+//    import されていないモジュール (例: popovers.js) を見逃す。エントリから実際に
+//    評価された物と、lib/*.js と import map の全項目を突き合わせる。
+const evaluated = globalThis.__fgEvaluated;
+if (!failed) {
+  for (const f of libFiles.filter((name) => !evaluated.has(name))) {
+    failed = true;
+    console.error(
+      `✗ [読み込まれないモジュール] ${f} は ${entryFile} からたどれない (どこからも import されていない)`,
+    );
+  }
+  for (const [spec, file] of Object.entries(specToFile)) {
+    if (!libFiles.includes(file)) {
+      failed = true;
+      console.error(`✗ [import map の行き先が無い] "${spec}" -> ${file}`);
+    }
+  }
+}
+
 if (failed) {
   process.exit(1);
 } else {
-  console.log(`✓ module graph loads cleanly (entry: ${entryFile}, ${libFiles.length} module(s))`);
+  console.log(
+    `✓ module graph loads cleanly (entry: ${entryFile}, ${evaluated.size}/${libFiles.length} module(s) evaluated)`,
+  );
   process.exit(0);
 }
